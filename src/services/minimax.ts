@@ -29,14 +29,17 @@ export async function generateSummary(
 ): Promise<SummaryResult> {
   const prompt = `${SUMMARY_PROMPT}\n\nArticle content:\n---\n${content.substring(0, 3000)}\n---`;
 
-  const response = await fetch(`${env.MINIMAX_BASE_URL}/chat/completions`, {
+  const MINIMAX_BASE_URL = 'https://api.minimaxi.com/v1';
+  const MINIMAX_MODEL = 'MiniMax-M2.7';
+
+  const response = await fetch(`${MINIMAX_BASE_URL}/chat/completions`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${env.MINIMAX_API_KEY}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: env.MINIMAX_MODEL,
+      model: MINIMAX_MODEL,
       messages: [
         {
           role: 'user',
