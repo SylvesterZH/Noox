@@ -1,20 +1,37 @@
 import { Env } from '../index';
-import { fetchItems } from '../services/supabase';
+import { fetchItems, deleteItem } from '../services/supabase';
+import { requireUser } from '../services/auth';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type',
+  'Access-Control-Allow-Methods': 'GET, DELETE, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 };
 
 export async function handleGetItems(request: Request, env: Env): Promise<Response> {
+  // Authenticate user
+  const authResult = await requireUser(request, env);
+  if (authResult instanceof Response) return authResult;
+  const { user } = authResult;
+
+  // Get token for Supabase requests
+  const authHeader = request.headers.get('Authorization');
+  const userToken = authHeader?.slice(7).trim();
+
   const url = new URL(request.url);
-  const limit = parseInt(url.searchParams.get('limit') || '20');
-  const offset = parseInt(url.searchParams.get('offset') || '0');
+  // Parse with validation - default to 20, max 50, min 1
+  const rawLimit = url.searchParams.get('limit');
+  const rawOffset = url.searchParams.get('offset');
+
+  const parsedLimit = rawLimit ? parseInt(rawLimit) : NaN;
+  const parsedOffset = rawOffset ? parseInt(rawOffset) : NaN;
+
+  const limit = isNaN(parsedLimit) ? 20 : Math.min(Math.max(1, parsedLimit), 50);
+  const offset = isNaN(parsedOffset) || parsedOffset < 0 ? 0 : parsedOffset;
   const category = url.searchParams.get('category') || undefined;
 
   try {
-    const { items, total } = await fetchItems(env, { limit, offset, category });
+    const { items, total } = await fetchItems(env, { limit, offset, category }, userToken);
 
     // Transform to include category name directly
     const transformedItems = items.map((item) => ({
@@ -43,7 +60,29 @@ export async function handleGetItems(request: Request, env: Env): Promise<Respon
   } catch (error) {
     console.error('Error fetching items:', error);
     return new Response(
-      JSON.stringify({ error: 'Failed to fetch items' }),
+      JSON.stringify({ error: 'Failed to fetch items', code: 'FETCH_FAILED' }),
+      { status: 500, headers: { 'Content-Type': 'application/json', ...corsHeaders } }
+    );
+  }
+}
+
+export async function handleDeleteItem(request: Request, env: Env, id: string): Promise<Response> {
+  const authResult = await requireUser(request, env);
+  if (authResult instanceof Response) return authResult;
+
+  try {
+    const authHeader = request.headers.get('Authorization');
+    const userToken = authHeader?.slice(7).trim();
+    await deleteItem(env, id, userToken);
+
+    return new Response(JSON.stringify({ success: true }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json', ...corsHeaders },
+    });
+  } catch (error) {
+    console.error('Error deleting item:', error);
+    return new Response(
+      JSON.stringify({ error: 'Failed to delete item', code: 'DELETE_FAILED' }),
       { status: 500, headers: { 'Content-Type': 'application/json', ...corsHeaders } }
     );
   }

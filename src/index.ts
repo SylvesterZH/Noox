@@ -1,5 +1,5 @@
 import { handleSave } from './routes/save';
-import { handleGetItems } from './routes/items';
+import { handleGetItems, handleDeleteItem } from './routes/items';
 import { handleSearch } from './routes/search';
 import { handleCategories, handleUpdateItem } from './routes/categories';
 
@@ -13,7 +13,7 @@ export interface Env {
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, PATCH, OPTIONS',
+  'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 };
 
@@ -48,6 +48,11 @@ async function handleRequest(request: Request, env: Env): Promise<Response> {
     if (path.match(/^\/api\/items\/([^/]+)$/) && method === 'PATCH') {
       const id = path.match(/^\/api\/items\/([^/]+)$/)![1];
       return await handleUpdateItem(request, env, id);
+    }
+
+    if (path.match(/^\/api\/items\/([^/]+)$/) && method === 'DELETE') {
+      const id = path.match(/^\/api\/items\/([^/]+)$/)![1];
+      return await handleDeleteItem(request, env, id);
     }
 
     return new Response(JSON.stringify({ error: 'Not found' }), {
