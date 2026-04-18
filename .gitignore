@@ -39,3 +39,6 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+.gitnexus
+**/.null.swp
+**/.DS_Store
