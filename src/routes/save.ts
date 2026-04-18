@@ -18,7 +18,7 @@ export async function handleSave(request: Request, env: Env): Promise<Response> 
 
   try {
     const body = await request.json();
-    const { url, content, contentType } = body;
+    const { url, content, contentType, resolvedUrl } = body;
 
     // Validate URL
     if (!url || typeof url !== 'string') {
@@ -88,50 +88,58 @@ export async function handleSave(request: Request, env: Env): Promise<Response> 
       }
     } else {
       // Fetch page content via Jina (server-side fallback)
+      // Use resolvedUrl if provided (for short URL redirects), otherwise use original url
+      const fetchUrl = resolvedUrl || url;
       try {
-        parsed = await fetchPage(url);
+        parsed = await fetchPage(fetchUrl);
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Unknown error';
-        if (message.includes('403') || message.includes('401')) {
-          return new Response(
-            JSON.stringify({ error: 'This page is blocked or requires authentication', code: 'FETCH_FORBIDDEN' }),
-            { status: 422, headers: { 'Content-Type': 'application/json', ...corsHeaders } }
-          );
-        }
-        if (message.includes('404')) {
-          return new Response(
-            JSON.stringify({ error: 'This page could not be found', code: 'FETCH_NOT_FOUND' }),
-            { status: 422, headers: { 'Content-Type': 'application/json', ...corsHeaders } }
-          );
-        }
-        if (message.includes('429')) {
+        // 451 = Unavailable For Legal Reasons (content blocked)
+        // For blocked/private pages, we still save the URL with minimal data
+        if (message.includes('451') || message.includes('403') || message.includes('401') || message.includes('404')) {
+          // Save with empty/minimal content - the user can try to refresh later
+          parsed = {
+            title: extractDomain(fetchUrl),
+            content: '',
+            description: '',
+          };
+        } else if (message.includes('429')) {
           return new Response(
             JSON.stringify({ error: 'Too many requests. Please try again later.', code: 'RATE_LIMITED' }),
             { status: 429, headers: { 'Content-Type': 'application/json', ...corsHeaders } }
           );
+        } else {
+          // For other fetch failures, save with domain as title
+          parsed = {
+            title: extractDomain(fetchUrl),
+            content: '',
+            description: '',
+          };
         }
+      }
+    }
+
+    // Generate AI summary — skip if no content available
+    let summaryResult;
+    if (!parsed.content || parsed.content.trim().length === 0) {
+      // No content to summarize (blocked/private page) — save with empty summary
+      summaryResult = { summary: '', tags: [] };
+    } else {
+      try {
+        summaryResult = await generateSummary(env, parsed.content);
+      } catch (err) {
+        console.error('AI summary failed:', err);
         return new Response(
-          JSON.stringify({ error: "Couldn't access this page. It might be private or blocked.", code: 'FETCH_FAILED' }),
-          { status: 422, headers: { 'Content-Type': 'application/json', ...corsHeaders } }
+          JSON.stringify({ error: 'Summary generation failed. The link was still saved.', code: 'AI_FAILED' }),
+          { status: 500, headers: { 'Content-Type': 'application/json', ...corsHeaders } }
         );
       }
     }
 
-    // Generate AI summary
-    let summaryResult;
-    try {
-      summaryResult = await generateSummary(env, parsed.content);
-    } catch (err) {
-      console.error('AI summary failed:', err);
-      return new Response(
-        JSON.stringify({ error: 'Summary generation failed. The link was still saved.', code: 'AI_FAILED' }),
-        { status: 500, headers: { 'Content-Type': 'application/json', ...corsHeaders } }
-      );
-    }
-
     // Check if title is noise, if so generate a new one
+    // Only attempt if we have content to work with
     let finalTitle = parsed.title;
-    if (isNoiseTitle(finalTitle)) {
+    if (isNoiseTitle(finalTitle) && parsed.content && parsed.content.trim().length > 0) {
       try {
         const titleResult = await generateTitle(env, parsed.content);
         finalTitle = titleResult.title;
