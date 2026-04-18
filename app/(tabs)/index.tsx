@@ -63,6 +63,30 @@ export default function FeedScreen() {
   const [fetchedUrl, setFetchedUrl] = useState<string | null>(null);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
 
+  // Visible WebView modal state (for blocked platforms like 小红书)
+  const [showVisibleWebview, setShowVisibleWebview] = useState(false);
+  const [visibleWebviewUrl, setVisibleWebviewUrl] = useState<string | null>(null);
+  const [visibleWebviewLoading, setVisibleWebviewLoading] = useState(false);
+  const visibleWebviewRef = useRef<WebView>(null);
+  const [visibleWebviewCanGoBack, setVisibleWebviewCanGoBack] = useState(false);
+  const [visibleWebviewCanGoForward, setVisibleWebviewCanGoForward] = useState(false);
+
+  // Check if URL is from a platform that blocks hidden WebView content extraction
+  const isBlockedPlatform = (url: string): boolean => {
+    try {
+      const hostname = new URL(url).hostname.toLowerCase();
+      return (
+        hostname.includes('xiaohongshu') ||
+        hostname.includes('xhslink') ||
+        hostname.includes('weixin') ||
+        hostname.includes('mp.weixin') ||
+        hostname.includes('wechat')
+      );
+    } catch {
+      return false;
+    }
+  };
+
   // Clipboard preview modal state
   const [showClipboardModal, setShowClipboardModal] = useState(false);
   const [clipboardUrl, setClipboardUrl] = useState<string | null>(null);
@@ -194,10 +218,24 @@ export default function FeedScreen() {
 
   const handleSave = () => {
     if (!urlInput.trim()) return;
-    // Close modal immediately, then show processing indicator
+    const url = urlInput.trim();
+
+    // Close modal immediately, then determine how to fetch
     setShowSaveModal(false);
     setErrorMessage(null);
-    setFetchedUrl(urlInput.trim());
+
+    // For blocked platforms (小红书, 微信, etc.), use visible WebView
+    if (isBlockedPlatform(url)) {
+      setUrlInput('');
+      setFetchedUrl(url);
+      setVisibleWebviewUrl(url);
+      setVisibleWebviewLoading(true);
+      setShowVisibleWebview(true);
+      return;
+    }
+
+    // Normal flow: use hidden ContentFetcher
+    setFetchedUrl(url);
     setFetchingContent(true);
     setIsProcessing(true);
     setProcessingMessage('Fetching content...');
@@ -657,12 +695,196 @@ export default function FeedScreen() {
         </Pressable>
       </Modal>
 
-      {/* Content Fetcher - outside modal so it continues after modal closes */}
-      <ContentFetcher
-        url={fetchedUrl}
-        onContent={handleContentFetched}
-        onError={handleContentError}
-      />
+      {/* Content Fetcher - only for non-blocked platforms */}
+      {/* For blocked platforms (小红书, 微信), we show visible WebView instead */}
+      {!isBlockedPlatform(fetchedUrl || '') && (
+        <ContentFetcher
+          url={fetchedUrl}
+          onContent={handleContentFetched}
+          onError={handleContentError}
+        />
+      )}
+
+      {/* Visible WebView Modal - for blocked platforms */}
+      <Modal
+        visible={showVisibleWebview}
+        animationType="slide"
+        onRequestClose={() => {
+          Alert.alert(
+            'Cancel save?',
+            'Do you want to cancel saving this link?',
+            [
+              { text: 'Continue browsing', style: 'cancel' },
+              {
+                text: 'Cancel',
+                style: 'destructive',
+                onPress: () => {
+                  setShowVisibleWebview(false);
+                  setVisibleWebviewUrl(null);
+                  setFetchedUrl(null);
+                  setVisibleWebviewLoading(false);
+                },
+              },
+            ]
+          );
+        }}
+      >
+        <View style={[styles.viewerContainer, { backgroundColor: isDark ? '#000' : '#fff' }]}>
+          {/* Header with save button */}
+          <View
+            style={[
+              styles.viewerHeader,
+              {
+                backgroundColor: isDark ? colors.surfaceContainerLow : '#fff',
+                borderBottomColor: colors.outlineVariant,
+              },
+            ]}
+          >
+            <TouchableOpacity
+              style={styles.viewerCloseBtn}
+              onPress={() => {
+                Alert.alert(
+                  'Cancel save?',
+                  'Do you want to cancel saving this link?',
+                  [
+                    { text: 'Continue browsing', style: 'cancel' },
+                    {
+                      text: 'Cancel',
+                      style: 'destructive',
+                      onPress: () => {
+                        setShowVisibleWebview(false);
+                        setVisibleWebviewUrl(null);
+                        setFetchedUrl(null);
+                        setVisibleWebviewLoading(false);
+                      },
+                    },
+                  ]
+                );
+              }}
+            >
+              <MaterialIcons name="close" size={24} color={colors.onSurface} />
+            </TouchableOpacity>
+            <Text
+              style={[styles.viewerTitle, { color: colors.onSurface }]}
+              numberOfLines={1}
+            >
+              {visibleWebviewUrl ? new URL(visibleWebviewUrl).hostname : ''}
+            </Text>
+            <TouchableOpacity
+              style={[styles.saveLinkBtn, { backgroundColor: colors.primary }]}
+              onPress={() => {
+                setIsProcessing(true);
+                setProcessingMessage('Saving link...');
+                setShowVisibleWebview(false);
+                // Save without content - just the URL
+                saveUrl(fetchedUrl!)
+                  .then(async () => {
+                    const res = await getItems({ limit: 50 });
+                    const newItem = res.items.find(i => i.url === fetchedUrl);
+                    setIsProcessing(false);
+                    setProcessingMessage('');
+                    setFetchedUrl(null);
+                    setVisibleWebviewUrl(null);
+                    setUrlInput('');
+                    if (newItem) {
+                      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                      setItems(prev => [newItem, ...prev]);
+                    } else {
+                      setItems(res.items);
+                    }
+                  })
+                  .catch((e: any) => {
+                    setIsProcessing(false);
+                    setProcessingMessage('');
+                    setErrorMessage(e.message || 'Failed to save');
+                    setShowVisibleWebview(true); // Reopen on error
+                  });
+              }}
+            >
+              <Text style={[styles.saveLinkBtnText, { color: colors.onPrimary }]}>
+                Save
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Loading indicator */}
+          {visibleWebviewLoading && (
+            <View style={[styles.webviewLoadingBar, { backgroundColor: colors.primary }]} />
+          )}
+
+          {/* WebView */}
+          <View style={styles.viewerWebview}>
+            {visibleWebviewUrl && (
+              <WebView
+                ref={visibleWebviewRef}
+                source={{ uri: visibleWebviewUrl }}
+                onNavigationStateChange={(navState: WebViewNavigation) => {
+                  setVisibleWebviewCanGoBack(navState.canGoBack);
+                  setVisibleWebviewCanGoForward(navState.canGoForward);
+                  setVisibleWebviewLoading(navState.loading);
+                }}
+                onError={() => setVisibleWebviewLoading(false)}
+                onLoadStart={() => setVisibleWebviewLoading(true)}
+                onLoadEnd={() => setVisibleWebviewLoading(false)}
+                style={{ flex: 1 }}
+                startInLoadingState={false}
+                scalesPageToFit={true}
+                javaScriptEnabled={true}
+                domStorageEnabled={true}
+                allowsBackForwardNavigationGestures={true}
+              />
+            )}
+          </View>
+
+          {/* Toolbar */}
+          <View
+            style={[
+              styles.viewerToolbar,
+              {
+                backgroundColor: isDark ? colors.surfaceContainerLow : '#fff',
+                borderTopColor: colors.outlineVariant,
+              },
+            ]}
+          >
+            <TouchableOpacity
+              style={[styles.toolbarBtn, !visibleWebviewCanGoBack && styles.toolbarBtnDisabled]}
+              onPress={() => visibleWebviewRef.current?.goBack()}
+              disabled={!visibleWebviewCanGoBack}
+            >
+              <MaterialIcons
+                name="arrow-back"
+                size={22}
+                color={visibleWebviewCanGoBack ? colors.onSurface : colors.outlineVariant}
+              />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.toolbarBtn, !visibleWebviewCanGoForward && styles.toolbarBtnDisabled]}
+              onPress={() => visibleWebviewRef.current?.goForward()}
+              disabled={!visibleWebviewCanGoForward}
+            >
+              <MaterialIcons
+                name="arrow-forward"
+                size={22}
+                color={visibleWebviewCanGoForward ? colors.onSurface : colors.outlineVariant}
+              />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.toolbarBtn}
+              onPress={() => visibleWebviewRef.current?.reload()}
+            >
+              <MaterialIcons name="refresh" size={22} color={colors.onSurface} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.toolbarBtn}
+              onPress={() => {
+                if (visibleWebviewUrl) Share.share({ url: visibleWebviewUrl });
+              }}
+            >
+              <MaterialIcons name="share" size={22} color={colors.onSurface} />
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
 
       {/* Article Viewer Modal */}
       <Modal
@@ -980,6 +1202,20 @@ const styles = StyleSheet.create({
   },
   toolbarBtnDisabled: {
     opacity: 0.4,
+  },
+  saveLinkBtn: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: 999,
+    marginLeft: spacing.sm,
+  },
+  saveLinkBtnText: {
+    fontWeight: '700',
+    fontSize: fontSizes.sm,
+  },
+  webviewLoadingBar: {
+    height: 2,
+    width: '100%',
   },
 
   // Clipboard Modal
