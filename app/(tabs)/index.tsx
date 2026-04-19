@@ -106,9 +106,7 @@ export default function FeedScreen() {
   const [visibleWebviewCanGoBack, setVisibleWebviewCanGoBack] = useState(false);
   const [visibleWebviewCanGoForward, setVisibleWebviewCanGoForward] = useState(false);
   const [visibleWebviewSaving, setVisibleWebviewSaving] = useState(false);
-  const [visibleWebviewExtracted, setVisibleWebviewExtracted] = useState(false);
-  const [visibleWebviewExtracting, setVisibleWebviewExtracting] = useState(false);
-  const visibleWebviewExtractedContentRef = useRef<{ title: string; text: string } | null>(null);
+  const [webviewExtractedContent, setWebviewExtractedContent] = useState<{ title: string; text: string } | null>(null);
 
   // Check if URL is from a platform that blocks hidden WebView content extraction
   const isBlockedPlatform = (url: string): boolean => {
@@ -269,9 +267,7 @@ export default function FeedScreen() {
       setFetchedUrl(url);
       setVisibleWebviewUrl(url);
       setVisibleWebviewLoading(true);
-      setVisibleWebviewExtracting(true);
-      setVisibleWebviewExtracted(false);
-      visibleWebviewExtractedContentRef.current = null;
+      setWebviewExtractedContent(null);
       setShowVisibleWebview(true);
       return;
     }
@@ -777,6 +773,7 @@ export default function FeedScreen() {
             style={[
               styles.viewerHeader,
               {
+                paddingTop: insets.top + spacing.sm,
                 backgroundColor: isDark ? colors.surfaceContainerLow : '#fff',
                 borderBottomColor: colors.outlineVariant,
               },
@@ -813,13 +810,21 @@ export default function FeedScreen() {
               {visibleWebviewUrl ? new URL(visibleWebviewUrl).hostname : ''}
             </Text>
             <TouchableOpacity
-              style={[styles.saveLinkBtn, { backgroundColor: colors.primary }, (visibleWebviewSaving || visibleWebviewExtracting) && styles.disabledBtn]}
+              style={[styles.saveLinkBtn, { backgroundColor: colors.primary }, visibleWebviewSaving && styles.disabledBtn]}
               onPress={() => {
-                if (visibleWebviewSaving || visibleWebviewExtracting) return;
+                if (visibleWebviewSaving) return;
                 setVisibleWebviewSaving(true);
 
+                // Close WebView immediately
+                setShowVisibleWebview(false);
+                setVisibleWebviewUrl(null);
+
+                // Show processing indicator on main screen
+                setIsProcessing(true);
+                setProcessingMessage('Saving link...');
+
                 // Use pre-extracted content if available, otherwise just save URL
-                const extracted = visibleWebviewExtractedContentRef.current;
+                const extracted = webviewExtractedContent;
                 const saveOptions = extracted && extracted.text.trim().length > 0
                   ? { content: extracted.text, contentType: 'text' as const }
                   : undefined;
@@ -829,11 +834,10 @@ export default function FeedScreen() {
                     const res = await getItems({ limit: 50 });
                     const newItem = res.items.find(i => i.url === fetchedUrl);
                     setVisibleWebviewSaving(false);
-                    setShowVisibleWebview(false);
+                    setIsProcessing(false);
+                    setProcessingMessage('');
                     setFetchedUrl(null);
-                    setVisibleWebviewUrl(null);
-                    setVisibleWebviewExtracted(false);
-                    visibleWebviewExtractedContentRef.current = null;
+                    setWebviewExtractedContent(null);
                     setUrlInput('');
                     if (newItem) {
                       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
@@ -844,23 +848,22 @@ export default function FeedScreen() {
                   })
                   .catch((e: any) => {
                     setVisibleWebviewSaving(false);
+                    setIsProcessing(false);
+                    setProcessingMessage('');
                     const code = (e as any).code;
                     if (code === 'DUPLICATE') {
                       setErrorMessage('This link is already saved');
                     } else {
                       setErrorMessage(e.message || 'Failed to save');
                     }
-                    setShowVisibleWebview(false);
                     setFetchedUrl(null);
-                    setVisibleWebviewUrl(null);
-                    setVisibleWebviewExtracted(false);
-                    visibleWebviewExtractedContentRef.current = null;
+                    setWebviewExtractedContent(null);
                   });
               }}
-              disabled={visibleWebviewSaving || visibleWebviewExtracting}
+              disabled={visibleWebviewSaving}
             >
               <Text style={[styles.saveLinkBtnText, { color: colors.onPrimary }]}>
-                {visibleWebviewSaving ? 'Saving...' : visibleWebviewExtracting ? 'Extracting...' : 'Save'}
+                {visibleWebviewSaving ? 'Saving...' : 'Save'}
               </Text>
             </TouchableOpacity>
           </View>
@@ -880,12 +883,10 @@ export default function FeedScreen() {
                   try {
                     const data = JSON.parse(event.nativeEvent.data);
                     if (data.type === 'EXTRACTED' && data.success) {
-                      visibleWebviewExtractedContentRef.current = {
+                      setWebviewExtractedContent({
                         title: data.title || '',
                         text: data.text || '',
-                      };
-                      setVisibleWebviewExtracting(false);
-                      setVisibleWebviewExtracted(true);
+                      });
                     }
                   } catch {}
                 }}
@@ -894,9 +895,7 @@ export default function FeedScreen() {
                   setVisibleWebviewCanGoForward(navState.canGoForward);
                   setVisibleWebviewLoading(navState.loading);
                   // Reset extraction state on navigation
-                  setVisibleWebviewExtracting(true);
-                  setVisibleWebviewExtracted(false);
-                  visibleWebviewExtractedContentRef.current = null;
+                  setWebviewExtractedContent(null);
                 }}
                 onLoadEnd={() => {
                   setVisibleWebviewLoading(false);
@@ -905,7 +904,6 @@ export default function FeedScreen() {
                 }}
                 onError={() => {
                   setVisibleWebviewLoading(false);
-                  setVisibleWebviewExtracting(false);
                 }}
                 style={{ flex: 1 }}
                 startInLoadingState={false}
@@ -924,6 +922,7 @@ export default function FeedScreen() {
               {
                 backgroundColor: isDark ? colors.surfaceContainerLow : '#fff',
                 borderTopColor: colors.outlineVariant,
+                paddingBottom: insets.bottom + spacing.md,
               },
             ]}
           >
