@@ -1,30 +1,41 @@
 {
   "expo": {
-    "name": "NooxApp",
+    "name": "Noox",
     "slug": "NooxApp",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
+    "scheme": "noox",
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#0D0D0D"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.noox.app"
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "backgroundColor": "#0D0D0D"
       },
-      "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "edgeToEdgeEnabled": true
     },
     "web": {
-      "favicon": "./assets/favicon.png"
-    }
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-font",
+        {
+          "fonts": ["./assets/fonts/TMincho-GT01.ttc"]
+        }
+      ]
+    ]
   }
 }
