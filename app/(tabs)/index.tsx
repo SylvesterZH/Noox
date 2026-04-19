@@ -42,6 +42,41 @@ import ProcessingIndicator from '../../components/ProcessingIndicator';
 
 const MAX_CONSUMPTION = 50; // Maximum items user can save
 
+// JavaScript injected into the visible WebView to extract content in the background
+const VISIBLE_WEBVIEW_EXTRACT_SCRIPT = `
+(function() {
+  try {
+    var title = document.title || '';
+    var metaOgTitle = document.querySelector('meta[property="og:title"]');
+    if (metaOgTitle) { var og = metaOgTitle.getAttribute('content'); if (og) title = og; }
+    var metaTwitterTitle = document.querySelector('meta[name="twitter:title"]');
+    if (metaTwitterTitle) { var tw = metaTwitterTitle.getAttribute('content'); if (tw && tw.length > title.length) title = tw; }
+    var h1 = document.querySelector('h1');
+    if (h1 && h1.innerText && h1.innerText.length > title.length) title = h1.innerText.trim();
+
+    var bodyText = '';
+    var article = document.querySelector('article');
+    if (article) bodyText = article.innerText || '';
+    if (!bodyText) { var main = document.querySelector('main'); if (main) bodyText = main.innerText || ''; }
+    if (!bodyText) bodyText = document.body ? document.body.innerText : '';
+
+    window.ReactNativeWebView.postMessage(JSON.stringify({
+      type: 'EXTRACTED',
+      title: title.substring(0, 200),
+      text: bodyText.substring(0, 5000),
+      success: true
+    }));
+  } catch(e) {
+    window.ReactNativeWebView.postMessage(JSON.stringify({
+      type: 'EXTRACTED',
+      success: false,
+      error: e.message
+    }));
+  }
+})();
+true;
+`;
+
 export default function FeedScreen() {
   const { colors, isDark } = useTheme();
   const { user, loading: authLoading } = useAuth();
@@ -70,6 +105,10 @@ export default function FeedScreen() {
   const visibleWebviewRef = useRef<WebView>(null);
   const [visibleWebviewCanGoBack, setVisibleWebviewCanGoBack] = useState(false);
   const [visibleWebviewCanGoForward, setVisibleWebviewCanGoForward] = useState(false);
+  const [visibleWebviewSaving, setVisibleWebviewSaving] = useState(false);
+  const [visibleWebviewExtracted, setVisibleWebviewExtracted] = useState(false);
+  const [visibleWebviewExtracting, setVisibleWebviewExtracting] = useState(false);
+  const visibleWebviewExtractedContentRef = useRef<{ title: string; text: string } | null>(null);
 
   // Check if URL is from a platform that blocks hidden WebView content extraction
   const isBlockedPlatform = (url: string): boolean => {
@@ -230,6 +269,9 @@ export default function FeedScreen() {
       setFetchedUrl(url);
       setVisibleWebviewUrl(url);
       setVisibleWebviewLoading(true);
+      setVisibleWebviewExtracting(true);
+      setVisibleWebviewExtracted(false);
+      visibleWebviewExtractedContentRef.current = null;
       setShowVisibleWebview(true);
       return;
     }
@@ -771,20 +813,27 @@ export default function FeedScreen() {
               {visibleWebviewUrl ? new URL(visibleWebviewUrl).hostname : ''}
             </Text>
             <TouchableOpacity
-              style={[styles.saveLinkBtn, { backgroundColor: colors.primary }]}
+              style={[styles.saveLinkBtn, { backgroundColor: colors.primary }, (visibleWebviewSaving || visibleWebviewExtracting) && styles.disabledBtn]}
               onPress={() => {
-                setIsProcessing(true);
-                setProcessingMessage('Saving link...');
-                setShowVisibleWebview(false);
-                // Save without content - just the URL
-                saveUrl(fetchedUrl!)
+                if (visibleWebviewSaving || visibleWebviewExtracting) return;
+                setVisibleWebviewSaving(true);
+
+                // Use pre-extracted content if available, otherwise just save URL
+                const extracted = visibleWebviewExtractedContentRef.current;
+                const saveOptions = extracted && extracted.text.trim().length > 0
+                  ? { content: extracted.text, contentType: 'text' as const }
+                  : undefined;
+
+                saveUrl(fetchedUrl!, saveOptions)
                   .then(async () => {
                     const res = await getItems({ limit: 50 });
                     const newItem = res.items.find(i => i.url === fetchedUrl);
-                    setIsProcessing(false);
-                    setProcessingMessage('');
+                    setVisibleWebviewSaving(false);
+                    setShowVisibleWebview(false);
                     setFetchedUrl(null);
                     setVisibleWebviewUrl(null);
+                    setVisibleWebviewExtracted(false);
+                    visibleWebviewExtractedContentRef.current = null;
                     setUrlInput('');
                     if (newItem) {
                       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
@@ -794,15 +843,24 @@ export default function FeedScreen() {
                     }
                   })
                   .catch((e: any) => {
-                    setIsProcessing(false);
-                    setProcessingMessage('');
-                    setErrorMessage(e.message || 'Failed to save');
-                    setShowVisibleWebview(true); // Reopen on error
+                    setVisibleWebviewSaving(false);
+                    const code = (e as any).code;
+                    if (code === 'DUPLICATE') {
+                      setErrorMessage('This link is already saved');
+                    } else {
+                      setErrorMessage(e.message || 'Failed to save');
+                    }
+                    setShowVisibleWebview(false);
+                    setFetchedUrl(null);
+                    setVisibleWebviewUrl(null);
+                    setVisibleWebviewExtracted(false);
+                    visibleWebviewExtractedContentRef.current = null;
                   });
               }}
+              disabled={visibleWebviewSaving || visibleWebviewExtracting}
             >
               <Text style={[styles.saveLinkBtnText, { color: colors.onPrimary }]}>
-                Save
+                {visibleWebviewSaving ? 'Saving...' : visibleWebviewExtracting ? 'Extracting...' : 'Save'}
               </Text>
             </TouchableOpacity>
           </View>
@@ -818,14 +876,37 @@ export default function FeedScreen() {
               <WebView
                 ref={visibleWebviewRef}
                 source={{ uri: visibleWebviewUrl }}
+                onMessage={(event) => {
+                  try {
+                    const data = JSON.parse(event.nativeEvent.data);
+                    if (data.type === 'EXTRACTED' && data.success) {
+                      visibleWebviewExtractedContentRef.current = {
+                        title: data.title || '',
+                        text: data.text || '',
+                      };
+                      setVisibleWebviewExtracting(false);
+                      setVisibleWebviewExtracted(true);
+                    }
+                  } catch {}
+                }}
                 onNavigationStateChange={(navState: WebViewNavigation) => {
                   setVisibleWebviewCanGoBack(navState.canGoBack);
                   setVisibleWebviewCanGoForward(navState.canGoForward);
                   setVisibleWebviewLoading(navState.loading);
+                  // Reset extraction state on navigation
+                  setVisibleWebviewExtracting(true);
+                  setVisibleWebviewExtracted(false);
+                  visibleWebviewExtractedContentRef.current = null;
                 }}
-                onError={() => setVisibleWebviewLoading(false)}
-                onLoadStart={() => setVisibleWebviewLoading(true)}
-                onLoadEnd={() => setVisibleWebviewLoading(false)}
+                onLoadEnd={() => {
+                  setVisibleWebviewLoading(false);
+                  // Inject extraction script when page finishes loading
+                  visibleWebviewRef.current?.injectJavaScript(VISIBLE_WEBVIEW_EXTRACT_SCRIPT);
+                }}
+                onError={() => {
+                  setVisibleWebviewLoading(false);
+                  setVisibleWebviewExtracting(false);
+                }}
                 style={{ flex: 1 }}
                 startInLoadingState={false}
                 scalesPageToFit={true}
@@ -1204,10 +1285,12 @@ const styles = StyleSheet.create({
     opacity: 0.4,
   },
   saveLinkBtn: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
     borderRadius: 999,
     marginLeft: spacing.sm,
+    minWidth: 60,
+    alignItems: 'center',
   },
   saveLinkBtnText: {
     fontWeight: '700',
