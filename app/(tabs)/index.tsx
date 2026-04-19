@@ -209,10 +209,10 @@ export default function FeedScreen() {
         const text = await Clipboard.getStringAsync();
         if (!text || text === lastClipboardRef.current) return;
 
-        const { url, title, cleanedUrl } = parseClipboardContent(text);
+        const { url, title } = parseClipboardContent(text);
         if (url) {
           lastClipboardRef.current = text;
-          setClipboardUrl(cleanedUrl || url);
+          setClipboardUrl(url);
           setClipboardTitle(title);
           setClipboardThumbnail(null);
           setShowClipboardModal(true);
@@ -241,7 +241,7 @@ export default function FeedScreen() {
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
     const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
 
-    const showListener = Keyboard.addListener(showEvent, (e: KeyboardEvent) => {
+    const showListener = Keyboard.addListener(showEvent, (e: any) => {
       setKeyboardHeight(e.endCoordinates.height);
     });
 
@@ -657,9 +657,9 @@ export default function FeedScreen() {
                 onPress={async () => {
                   const text = await Clipboard.getStringAsync();
                   if (text) {
-                    const { cleanedUrl } = parseClipboardContent(text);
-                    if (cleanedUrl) {
-                      setUrlInput(cleanedUrl);
+                    const { url } = parseClipboardContent(text);
+                    if (url) {
+                      setUrlInput(url);
                     } else {
                       setUrlInput(text);
                     }
