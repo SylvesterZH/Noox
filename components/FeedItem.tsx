@@ -46,17 +46,39 @@ function getTimeAgo(dateString: string): string {
   return date.toLocaleDateString();
 }
 
-function getSourceIcon(source: string): string {
+interface PlatformConfig {
+  name: string;
+  fallbackIcon: string;
+  iconPath?: string; // custom icon asset path
+}
+
+// Platform configs for friendly names and icons
+// When you provide custom icons, add them to assets/platforms/ and update iconPath
+const PLATFORM_CONFIGS: Record<string, PlatformConfig> = {
+  // Chinese platforms
+  'xiaohongshu': { name: '小红书', fallbackIcon: 'bookmark' },
+  'xhslink': { name: '小红书', fallbackIcon: 'bookmark' },
+  'mp.weixin': { name: '微信公众号', fallbackIcon: 'article' },
+  'weixin': { name: '微信', fallbackIcon: 'chat' },
+  'wechat': { name: '微信', fallbackIcon: 'chat' },
+  'bilibili': { name: '哔哩哔哩', fallbackIcon: 'play-circle-filled' },
+  // Global platforms
+  'twitter': { name: 'Twitter', fallbackIcon: 'tag' },
+  'x.com': { name: 'X', fallbackIcon: 'tag' },
+  'youtube': { name: 'YouTube', fallbackIcon: 'smart-display' },
+  'instagram': { name: 'Instagram', fallbackIcon: 'camera-alt' },
+  'tiktok': { name: 'TikTok', fallbackIcon: 'music-note' },
+  'medium': { name: 'Medium', fallbackIcon: 'edit' },
+  'substack': { name: 'Substack', fallbackIcon: 'edit' },
+  'reddit': { name: 'Reddit', fallbackIcon: 'forum' },
+};
+
+function getPlatformConfig(source: string): PlatformConfig {
   const domain = source.toLowerCase();
-  if (domain.includes('twitter') || domain.includes('x.com')) return 'tag';
-  if (domain.includes('youtube')) return 'smart-display';
-  if (domain.includes('instagram')) return 'camera-alt';
-  if (domain.includes('tiktok')) return 'music-note';
-  if (domain.includes('medium') || domain.includes('substack')) return 'edit';
-  if (domain.includes('reddit')) return 'forum';
-  if (domain.includes('news') || domain.includes('article')) return 'article';
-  if (domain.includes('blog')) return 'rss-feed';
-  return 'language';
+  for (const [key, config] of Object.entries(PLATFORM_CONFIGS)) {
+    if (domain.includes(key)) return config;
+  }
+  return { name: source, fallbackIcon: 'language' };
 }
 
 export default function FeedItem({
@@ -70,7 +92,8 @@ export default function FeedItem({
   const { colors } = useTheme();
   const [showMenu, setShowMenu] = useState(false);
   const timeAgo = getTimeAgo(item.created_at);
-  const sourceIcon = getSourceIcon(item.source);
+  const platform = getPlatformConfig(item.source);
+  const sourceIcon = platform.fallbackIcon;
 
   const handleDelete = () => {
     setShowMenu(false);
@@ -124,7 +147,7 @@ export default function FeedItem({
             />
           </View>
           <Text style={[styles.source, { color: colors.onSurfaceVariant }]}>
-            {item.source}
+            {platform.name}
           </Text>
           <View style={[styles.dot, { backgroundColor: colors.outlineVariant }]} />
           <Text style={[styles.time, { color: colors.onSurfaceVariant }]}>

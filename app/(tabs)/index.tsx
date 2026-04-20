@@ -402,6 +402,9 @@ export default function FeedScreen() {
 
   const getPlatformIcon = (source: string): string => {
     const domain = source.toLowerCase();
+    if (domain.includes('xiaohongshu') || domain.includes('xhslink')) return 'bookmark';
+    if (domain.includes('mp.weixin') || domain.includes('weixin') || domain.includes('wechat')) return 'chat';
+    if (domain.includes('bilibili')) return 'play-circle-filled';
     if (domain.includes('twitter') || domain.includes('x.com')) return 'tag';
     if (domain.includes('youtube')) return 'smart-display';
     if (domain.includes('instagram')) return 'camera-alt';
