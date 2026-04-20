@@ -44,9 +44,7 @@ export default function BottomNav() {
       style={[
         styles.container,
         {
-          backgroundColor: isDark
-            ? 'rgba(28,28,24,0.80)'
-            : 'rgba(252,249,242,0.80)',
+          backgroundColor: isDark ? colors.surface : colors.surface,
           borderTopColor: colors.outlineVariant,
         },
       ]}
