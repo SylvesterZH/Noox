@@ -49,18 +49,21 @@ function getTimeAgo(dateString: string): string {
 interface PlatformConfig {
   name: string;
   fallbackIcon: string;
-  iconPath?: string; // custom icon asset path
+  iconAsset?: number; // require() returns a number (module ID)
 }
 
 // Platform configs for friendly names and icons
-// When you provide custom icons, add them to assets/platforms/ and update iconPath
+// Custom PNG icons are loaded via require() and rendered via Image
+const xiaohongshuIcon = require('../assets/platforms/xiaohongshu.png');
+const wechatIcon = require('../assets/platforms/wechat.png');
+
 const PLATFORM_CONFIGS: Record<string, PlatformConfig> = {
   // Chinese platforms
-  'xiaohongshu': { name: '小红书', fallbackIcon: 'bookmark' },
-  'xhslink': { name: '小红书', fallbackIcon: 'bookmark' },
-  'mp.weixin': { name: '微信公众号', fallbackIcon: 'article' },
-  'weixin': { name: '微信', fallbackIcon: 'chat' },
-  'wechat': { name: '微信', fallbackIcon: 'chat' },
+  'xiaohongshu': { name: '小红书', fallbackIcon: 'bookmark', iconAsset: xiaohongshuIcon },
+  'xhslink': { name: '小红书', fallbackIcon: 'bookmark', iconAsset: xiaohongshuIcon },
+  'mp.weixin': { name: '微信公众号', fallbackIcon: 'article', iconAsset: wechatIcon },
+  'weixin': { name: '微信', fallbackIcon: 'chat', iconAsset: wechatIcon },
+  'wechat': { name: '微信', fallbackIcon: 'chat', iconAsset: wechatIcon },
   'bilibili': { name: '哔哩哔哩', fallbackIcon: 'play-circle-filled' },
   // Global platforms
   'twitter': { name: 'Twitter', fallbackIcon: 'tag' },
@@ -140,11 +143,19 @@ export default function FeedItem({
         {/* Meta header: source icon, domain, time */}
         <View style={styles.metaRow}>
           <View style={[styles.sourceIcon, { backgroundColor: colors.onSurface }]}>
-            <MaterialIcons
-              name={sourceIcon as any}
-              size={10}
-              color={colors.surface}
-            />
+            {platform.iconAsset ? (
+              <Image
+                source={platform.iconAsset}
+                style={{ width: 10, height: 10 }}
+                resizeMode="contain"
+              />
+            ) : (
+              <MaterialIcons
+                name={sourceIcon as any}
+                size={10}
+                color={colors.surface}
+              />
+            )}
           </View>
           <Text style={[styles.source, { color: colors.onSurfaceVariant }]}>
             {platform.name}
