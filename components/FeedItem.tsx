@@ -142,19 +142,21 @@ export default function FeedItem({
       >
         {/* Meta header: source icon, domain, time */}
         <View style={styles.metaRow}>
-          <View style={[styles.sourceIcon, { backgroundColor: colors.onSurface }]}>
+          <View style={styles.sourceIcon}>
             {platform.iconAsset ? (
               <Image
                 source={platform.iconAsset}
-                style={{ width: 10, height: 10 }}
-                resizeMode="contain"
+                style={{ width: 16, height: 16, borderRadius: 4 }}
+                resizeMode="cover"
               />
             ) : (
-              <MaterialIcons
-                name={sourceIcon as any}
-                size={10}
-                color={colors.surface}
-              />
+              <View style={[styles.sourceIconFallback, { backgroundColor: colors.onSurface }]}>
+                <MaterialIcons
+                  name={sourceIcon as any}
+                  size={10}
+                  color={colors.surface}
+                />
+              </View>
             )}
           </View>
           <Text style={[styles.source, { color: colors.onSurfaceVariant }]}>
@@ -276,6 +278,13 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   sourceIcon: {
+    width: 16,
+    height: 16,
+    borderRadius: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sourceIconFallback: {
     width: 16,
     height: 16,
     borderRadius: 4,
