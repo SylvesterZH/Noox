@@ -109,6 +109,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-around',
     alignItems: 'center',
     paddingHorizontal: 32,
+    marginTop: -9,
   },
   tabItem: {
     alignItems: 'center',
@@ -117,11 +118,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     minWidth: 72,
   },
-  activeTab: {
-    borderTopWidth: 2,
-    borderTopColor: 'inherit',
-    marginTop: -9,
-  },
+  activeTab: {},
   label: {
     fontSize: fontSizes.xs,
     fontWeight: '700',
