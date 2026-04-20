@@ -474,7 +474,10 @@ export default function FeedScreen() {
             item={item}
             hasImage={!!item.thumbnail_url}
             imageUrl={item.thumbnail_url}
-            onPress={() => setViewerUrl(item.url)}
+            onPress={() => {
+              setViewerUrl(item.url);
+              setViewerTitle(item.title);
+            }}
             onDelete={() => handleDelete(item.id)}
           />
         ))}
@@ -643,9 +646,9 @@ export default function FeedScreen() {
               ]}
             >
               <TextInput
-                style={[styles.input, { color: colors.onSurface }]}
+                style={[styles.input, { color: urlInput ? colors.onSurface : colors.outlineVariant }]}
                 placeholder="Paste URL here..."
-                placeholderTextColor={colors.onSurfaceVariant}
+                placeholderTextColor={colors.outline}
                 value={urlInput}
                 onChangeText={setUrlInput}
                 autoCapitalize="none"
@@ -776,7 +779,7 @@ export default function FeedScreen() {
             style={[
               styles.viewerHeader,
               {
-                paddingTop: insets.top + spacing.sm,
+                paddingTop: insets.top,
                 backgroundColor: isDark ? colors.surfaceContainerLow : '#fff',
                 borderBottomColor: colors.outlineVariant,
               },
@@ -810,7 +813,7 @@ export default function FeedScreen() {
               style={[styles.viewerTitle, { color: colors.onSurface }]}
               numberOfLines={1}
             >
-              {visibleWebviewUrl ? new URL(visibleWebviewUrl).hostname : ''}
+              {webviewExtractedContent?.title || (visibleWebviewUrl ? new URL(visibleWebviewUrl).hostname : 'Save Link')}
             </Text>
             <TouchableOpacity
               style={[styles.saveLinkBtn, { backgroundColor: colors.primary }, visibleWebviewSaving && styles.disabledBtn]}
@@ -981,6 +984,7 @@ export default function FeedScreen() {
             style={[
               styles.viewerHeader,
               {
+                paddingTop: insets.top,
                 backgroundColor: isDark ? colors.surfaceContainerLow : '#fff',
                 borderBottomColor: colors.outlineVariant,
               },
@@ -1017,7 +1021,9 @@ export default function FeedScreen() {
                   setCanGoBack(navState.canGoBack);
                   setCanGoForward(navState.canGoForward);
                   setViewerLoading(navState.loading);
-                  if (navState.title) {
+                  // Only update title if WebView provides a meaningful one (> 3 chars),
+                  // to avoid overwriting the saved item's title with generic platform names
+                  if (navState.title && navState.title.length > 3) {
                     setViewerTitle(navState.title);
                   }
                 }}
@@ -1039,6 +1045,7 @@ export default function FeedScreen() {
             style={[
               styles.viewerToolbar,
               {
+                paddingBottom: insets.bottom + spacing.md,
                 backgroundColor: isDark ? colors.surfaceContainerLow : '#fff',
                 borderTopColor: colors.outlineVariant,
               },
@@ -1194,6 +1201,8 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   inputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
     borderRadius: 16,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.md,
@@ -1256,8 +1265,8 @@ const styles = StyleSheet.create({
   viewerHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingTop: spacing['2xl'],
-    paddingBottom: spacing.md,
+    paddingTop: 10,
+    paddingBottom: 10,
     paddingHorizontal: spacing.md,
     borderBottomWidth: 1,
   },
@@ -1266,7 +1275,7 @@ const styles = StyleSheet.create({
   },
   viewerTitle: {
     flex: 1,
-    fontSize: fontSizes.md,
+    fontSize: 17,
     fontWeight: '600',
   },
   viewerWebview: {
