@@ -11,19 +11,9 @@ import {
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { useColorScheme } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useTheme, fontSizes, spacing } from '../lib/design';
 import { useAuth } from '../context/AuthContext';
-
-const COLORS = {
-  surface: '#fdf8fd',
-  surfaceDark: '#1c1b1f',
-  onSurface: '#1c1b1f',
-  onSurfaceVariant: '#564334',
-  white: '#ffffff',
-  orange500: '#ff8a00',
-  orange600: '#914c00',
-  error: '#EF4444',
-};
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
@@ -33,7 +23,8 @@ export default function LoginScreen() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const { user, loading: authLoading, signIn, signUp } = useAuth();
   const router = useRouter();
-  const isDark = useColorScheme() === 'dark';
+  const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
 
   // Redirect authenticated users to home
   useEffect(() => {
@@ -41,10 +32,6 @@ export default function LoginScreen() {
       router.replace('/');
     }
   }, [authLoading, user]);
-
-  const bg = isDark ? COLORS.surfaceDark : COLORS.surface;
-  const textColor = isDark ? '#fff' : COLORS.onSurface;
-  const textSecondary = isDark ? '#aaa' : COLORS.onSurfaceVariant;
 
   const handleSubmit = async () => {
     if (!email.trim()) {
@@ -91,33 +78,35 @@ export default function LoginScreen() {
 
   return (
     <KeyboardAvoidingView
-      style={[styles.container, { backgroundColor: bg }]}
+      style={[styles.container, { backgroundColor: colors.background }]}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      {/* Logo */}
-      <View style={styles.logoSection}>
-        <Text style={[styles.logo, { color: COLORS.orange500 }]}>Noox</Text>
-        <Text style={[styles.tagline, { color: textSecondary }]}>
+      {/* Header */}
+      <View style={[styles.header, { paddingTop: insets.top + spacing.lg }]}>
+        <Text style={[styles.logo, { color: colors.primary }]}>NOOX</Text>
+        <Text style={[styles.tagline, { color: colors.onSurfaceVariant }]}>
           Your second brain, indexed.
         </Text>
       </View>
 
-      {/* Form */}
-      <View style={styles.form}>
-        <Text style={[styles.formTitle, { color: textColor }]}>
+      {/* Form Card */}
+      <View style={styles.card}>
+        <Text style={[styles.formTitle, { color: colors.onSurface }]}>
           {isSignUp ? 'Create account' : 'Welcome back'}
         </Text>
 
         {/* Email input */}
-        <View style={[
-          styles.inputContainer,
-          { backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.03)' }
-        ]}>
-          <MaterialCommunityIcons name="email-outline" size={20} color={textSecondary} style={{ marginRight: 12 }} />
+        <View
+          style={[
+            styles.inputContainer,
+            { backgroundColor: colors.surfaceContainerLow },
+          ]}
+        >
+          <MaterialCommunityIcons name="email-outline" size={20} color={colors.onSurfaceVariant} style={{ marginRight: spacing.md }} />
           <TextInput
-            style={[styles.input, { color: textColor }]}
+            style={[styles.input, { color: colors.onSurface }]}
             placeholder="Email address"
-            placeholderTextColor="#888"
+            placeholderTextColor={colors.outline}
             value={email}
             onChangeText={(t) => { setEmail(t); setErrorMsg(null); }}
             keyboardType="email-address"
@@ -127,15 +116,17 @@ export default function LoginScreen() {
         </View>
 
         {/* Password input */}
-        <View style={[
-          styles.inputContainer,
-          { backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.03)' }
-        ]}>
-          <MaterialCommunityIcons name="lock-outline" size={20} color={textSecondary} style={{ marginRight: 12 }} />
+        <View
+          style={[
+            styles.inputContainer,
+            { backgroundColor: colors.surfaceContainerLow },
+          ]}
+        >
+          <MaterialCommunityIcons name="lock-outline" size={20} color={colors.onSurfaceVariant} style={{ marginRight: spacing.md }} />
           <TextInput
-            style={[styles.input, { color: textColor }]}
+            style={[styles.input, { color: colors.onSurface }]}
             placeholder="Password"
-            placeholderTextColor="#888"
+            placeholderTextColor={colors.outline}
             value={password}
             onChangeText={(t) => { setPassword(t); setErrorMsg(null); }}
             secureTextEntry
@@ -144,19 +135,23 @@ export default function LoginScreen() {
 
         {/* Error message */}
         {errorMsg && (
-          <View style={styles.errorContainer}>
-            <MaterialCommunityIcons name="alert-circle" size={16} color={COLORS.error} />
-            <Text style={styles.errorText}>{errorMsg}</Text>
+          <View style={[styles.errorContainer, { backgroundColor: colors.errorContainer }]}>
+            <MaterialCommunityIcons name="alert-circle" size={16} color={colors.onErrorContainer} />
+            <Text style={[styles.errorText, { color: colors.onErrorContainer }]}>{errorMsg}</Text>
           </View>
         )}
 
         {/* Submit button */}
         <TouchableOpacity
-          style={[styles.submitBtn, loading && styles.submitBtnDisabled]}
+          style={[
+            styles.submitBtn,
+            { backgroundColor: colors.primary },
+            loading && styles.submitBtnDisabled,
+          ]}
           onPress={handleSubmit}
           disabled={loading}
         >
-          <Text style={styles.submitBtnText}>
+          <Text style={[styles.submitBtnText, { color: colors.onPrimary }]}>
             {loading ? 'Please wait...' : isSignUp ? 'Create account' : 'Sign in'}
           </Text>
         </TouchableOpacity>
@@ -167,14 +162,17 @@ export default function LoginScreen() {
           setErrorMsg(null);
           setPassword('');
         }}>
-          <Text style={[styles.toggleText, { color: textSecondary }]}>
+          <Text style={[styles.toggleText, { color: colors.onSurfaceVariant }]}>
             {isSignUp ? 'Already have an account? ' : "Don't have an account? "}
-            <Text style={{ color: COLORS.orange500, fontWeight: '600' }}>
+            <Text style={{ color: colors.primary, fontWeight: '600' }}>
               {isSignUp ? 'Sign in' : 'Sign up'}
             </Text>
           </Text>
         </TouchableOpacity>
       </View>
+
+      {/* Bottom padding */}
+      <View style={{ height: insets.bottom + spacing.xl }} />
     </KeyboardAvoidingView>
   );
 }
@@ -182,73 +180,77 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    justifyContent: 'center',
-    paddingHorizontal: 32,
   },
-  logoSection: {
+  header: {
     alignItems: 'center',
-    marginBottom: 48,
+    paddingBottom: spacing['2xl'],
+    paddingHorizontal: spacing.xl,
   },
   logo: {
-    fontSize: 48,
-    fontWeight: '900',
-    letterSpacing: 4,
+    fontSize: fontSizes['2xl'],
+    fontWeight: '700',
+    letterSpacing: 2,
   },
   tagline: {
-    fontSize: 14,
-    marginTop: 8,
+    fontSize: fontSizes.sm,
+    marginTop: spacing.xs,
   },
-  form: {
-    gap: 12,
+  card: {
+    marginHorizontal: spacing.xl,
+    backgroundColor: 'transparent',
+    gap: spacing.md,
   },
   formTitle: {
-    fontSize: 24,
+    fontSize: fontSizes.xl,
     fontWeight: '700',
-    marginBottom: 8,
+    marginBottom: spacing.xs,
   },
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     borderRadius: 16,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
   },
   input: {
     flex: 1,
-    fontSize: 16,
+    fontSize: fontSizes.md,
   },
   errorContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    padding: 10,
-    backgroundColor: 'rgba(239,68,68,0.1)',
-    borderRadius: 8,
+    gap: spacing.sm,
+    padding: spacing.md,
+    borderRadius: 12,
   },
   errorText: {
-    color: COLORS.error,
-    fontSize: 13,
+    fontSize: fontSizes.sm,
+    flex: 1,
   },
   submitBtn: {
-    backgroundColor: COLORS.orange500,
-    borderRadius: 16,
-    paddingVertical: 16,
+    borderRadius: 999,
+    paddingVertical: spacing.md,
     alignItems: 'center',
-    marginTop: 4,
+    marginTop: spacing.xs,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 3,
   },
   submitBtnDisabled: {
     opacity: 0.6,
   },
   submitBtnText: {
-    color: COLORS.white,
     fontWeight: '700',
-    fontSize: 16,
+    fontSize: fontSizes.md,
+    letterSpacing: 0.5,
   },
   toggleBtn: {
     alignItems: 'center',
-    paddingVertical: 8,
+    paddingVertical: spacing.sm,
   },
   toggleText: {
-    fontSize: 14,
+    fontSize: fontSizes.sm,
   },
 });

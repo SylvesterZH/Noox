@@ -106,17 +106,13 @@ const styles = StyleSheet.create({
   },
   inner: {
     flexDirection: 'row',
-    justifyContent: 'space-around',
-    alignItems: 'center',
-    paddingHorizontal: 32,
     marginTop: -9,
   },
   tabItem: {
+    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     paddingTop: 8,
-    paddingHorizontal: 16,
-    minWidth: 72,
   },
   activeTab: {},
   label: {
