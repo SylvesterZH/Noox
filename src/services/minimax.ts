@@ -215,17 +215,17 @@ export async function generateDetailedSummary(
   // DEBUG: log raw response (truncated)
   console.log('[generateDetailedSummary] raw response:', text.substring(0, 500));
 
-  // Step 0: Remove thinking tags if present
-  let cleanText = text.replace(/<\/?(?:think|thought)>/gi, '').trim();
-  // Also remove <think> and ]]> style tags
-  cleanText = cleanText.replace(/^(?:<think>|<\/思考>)[\s\S]*?(?:|<\/思考>)/i, '').trim();
+  // Step 0: Remove thinking/reasoning tags if present
+  let cleanText = text
+    .replace(/<[^>]*>/g, '') // Remove all XML/HTML tags like <think> etc
+    .replace(/\[\/?[^\]]+\]/g, '') // Remove markdown-style tags
+    .trim();
 
   // Try to parse JSON from the response
   try {
     const jsonMatch = cleanText.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
       const parsed = JSON.parse(jsonMatch[0]);
-      // Check all possible keys based on language
       const overview = parsed['概要'] || parsed['Summary'] || parsed['overview'] || parsed['summary'] || '';
       const detailsRaw = parsed['详述'] || parsed['Details'] || parsed['details'] || parsed['詳述'] || [];
       const details = Array.isArray(detailsRaw) ? detailsRaw.slice(0, 8) : [];
@@ -236,43 +236,132 @@ export async function generateDetailedSummary(
     }
   } catch (e) {
     console.error('[generateDetailedSummary] JSON parse error:', e);
-    // Fall through to try text parsing
   }
 
-  // Fallback: try to parse plain text format
-  // Supports both Chinese and English labels, with or without markdown bold (**text**)
+  // Fallback: parse plain text format
+  // AI typically outputs:
+  // ## 概要 / Summary
+  // [content]
+  //
+  // ## 详述 / Details
+  // - bullet 1
+  // - bullet 2
+  // or:
+  // 概要：content
+  // 详述：
+  // - bullet 1
   try {
-    // Match patterns like "**概要**：" or "概要：" or "Summary:"
-    const overviewMatch = cleanText.match(/(?:\*\*)?(?:概要|Summary|Overview)(?:\*\*)?[:：]\s*([^\n]*?)(?:\n|$)/i);
-    const overview = overviewMatch ? overviewMatch[1].trim() : '';
-    const details: string[] = [];
-    // Match bullet points - support numbered lists (1. 2. etc) and bullet points (- * •)
-    const detailsSectionMatch = cleanText.match(/(?:\*\*)?(?:详述|Details|詳述)(?:\*\*)?[:：：]?\s*([\s\S]*?)$/i);
-    console.log('[generateDetailedSummary] detailsSectionMatch:', detailsSectionMatch ? 'matched' : 'null');
-    if (detailsSectionMatch) {
-      const sectionContent = detailsSectionMatch[1];
-      console.log('[generateDetailedSummary] sectionContent length:', sectionContent.length);
-      console.log('[generateDetailedSummary] sectionContent preview:', sectionContent.substring(0, 200));
-      // Match various bullet formats: "- item", "* item", "1. item", "① item", etc.
-      const bulletMatches = sectionContent.match(/(?:^|\n)\s*(?:[-*•]|\d+\.|①|②|③|④|⑤|⑥|⑦|⑧)[.、]\s*(.+)/gm);
-      console.log('[generateDetailedSummary] bulletMatches count:', bulletMatches ? bulletMatches.length : 0);
-      if (bulletMatches) {
-        for (const m of bulletMatches) {
-          const item = m.replace(/^\s*(?:[-*•]|\d+\.|①|②|③|④|⑤|⑥|⑦|⑧)[.、]\s*/, '').trim();
-          if (item) details.push(item);
+    let overview = '';
+    let details: string[] = [];
+
+    // Split by markdown headers ## 概要 / ## 详述
+    const lines = cleanText.split('\n');
+    let currentSection = '';
+    let inOverview = false;
+    let inDetails = false;
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      // Check for section headers (case insensitive, with or without ##)
+      const isOverviewHeader = /^(?:\*\*)?(?:概要|Summary)(?:\*\*)?$/i.test(trimmed);
+      const isDetailsHeader = /^(?:\*\*)?(?:详述|Details)(?:\*\*)?$/i.test(trimmed);
+
+      if (isOverviewHeader) {
+        inOverview = true;
+        inDetails = false;
+        continue;
+      }
+      if (isDetailsHeader) {
+        inOverview = false;
+        inDetails = true;
+        continue;
+      }
+
+      if (inOverview && trimmed) {
+        currentSection += (currentSection ? '\n' : '') + trimmed;
+      }
+      if (inDetails && trimmed) {
+        currentSection += (currentSection ? '\n' : '') + trimmed;
+      }
+    }
+
+    overview = currentSection;
+
+    // Now parse details from the details section
+    // Find the details section content
+    const detailsStartMatch = cleanText.match(/(?:^|\n)(?:##\s*)?(?:详述|Details)(?:.*?)(?:\n|$)([\s\S]*?)(?=^##|\n\n\n|$)/im);
+    const detailsContent = detailsStartMatch ? detailsStartMatch[1] : '';
+
+    // Extract bullet points from details content
+    // Support: "- item", "- **bold**：item", "1. item", "1、item"
+    const bulletMatches = detailsContent.match(/(?:^|\n)\s*[-*]\s+(.+?)(?:\n|$)/gm);
+    if (bulletMatches) {
+      for (const m of bulletMatches) {
+        const item = m.replace(/^[-*]\s+/, '').replace(/\*\*([^*]+)\*\*[:：]\s*/g, '$1：').trim();
+        if (item) details.push(item);
+      }
+    }
+
+    // Try numbered list if no bullets found
+    if (details.length === 0) {
+      const numberedMatches = detailsContent.match(/(?:^|\n)\s*(\d+[.、]\s*)(.+?)(?:\n|$)/gm);
+      if (numberedMatches) {
+        for (const m of numberedMatches) {
+          const numMatch = m.match(/(\d+[.、]\s*)(.+?)(?:\n|$)/);
+          if (numMatch && numMatch[2]) {
+            details.push(numMatch[2].trim());
+          }
         }
       }
     }
+
+    // Alternative: if no structured format found, try to extract overview from "概要：" pattern
+    if (!overview) {
+      const overviewMatch = cleanText.match(/(?:概要|Summary)[:：]\s*([\s\S]*?)(?:\n\n|\n##|$)/i);
+      if (overviewMatch && overviewMatch[1]) {
+        overview = overviewMatch[1].trim();
+      }
+    }
+
+    // Try to extract details from inline format "详述：" followed by content
+    if (details.length === 0) {
+      const detailsMatch = cleanText.match(/(?:详述|Details)[:：]\s*([\s\S]*?)$/i);
+      if (detailsMatch && detailsMatch[1]) {
+        const content = detailsMatch[1];
+        // Extract bullets
+        const bullets = content.match(/[-*]\s+(.+?)(?:\n|$)/g);
+        if (bullets) {
+          for (const b of bullets) {
+            const item = b.replace(/^[-*]\s+/, '').replace(/\*\*([^*]+)\*\*[:：]\s*/g, '$1：').trim();
+            if (item) details.push(item);
+          }
+        }
+        // Extract numbered items
+        if (details.length === 0) {
+          const numbered = content.match(/(\d+[.、]\s*)(.+?)(?:\n|$)/g);
+          if (numbered) {
+            for (const n of numbered) {
+              const match = n.match(/(\d+[.、]\s*)(.+?)(?:\n|$)/);
+              if (match && match[2]) details.push(match[2].trim());
+            }
+          }
+        }
+      }
+    }
+
     console.log('[generateDetailedSummary] text parsed, overview length:', overview.length, 'details count:', details.length);
     if (overview || details.length > 0) {
-      return { overview: overview || content.substring(0, 150) + '...', details: details.slice(0, 8) };
+      return {
+        overview: overview || content.substring(0, 150) + '...',
+        details: details.slice(0, 8),
+      };
     }
   } catch (e) {
     console.error('[generateDetailedSummary] text parse error:', e);
-    // Fall through to default
   }
 
-  // Fallback if all parsing fails
+  // Final fallback if all parsing fails
+  console.log('[generateDetailedSummary] all parsing failed, using fallback');
   return {
     overview: content.substring(0, 150) + '...',
     details: [],
