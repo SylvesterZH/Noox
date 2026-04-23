@@ -8,7 +8,11 @@ export interface Item {
   category_color: string | null;
   tags: string[];
   created_at: string;
-  thumbnail_url?: string; // Optional image preview from content extraction
+  thumbnail_url?: string;
+  detailed_summary: {
+    overview: string;
+    details: string[];
+  } | null;
 }
 
 export interface Category {
@@ -26,6 +30,7 @@ export interface SaveResponse {
   source: string;
   tags: string[];
   category: string | null;
+  detailed_summary: { overview: string; details: string[] } | null;
   created_at: string;
 }
 

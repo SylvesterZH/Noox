@@ -1,6 +1,7 @@
 /**
  * Feed Screen (Home)
- * Based on Stitch's new design
+ * No bottom tab bar, no top header
+ * Left menu opens SideDrawer, floating button opens Search
  */
 
 import React, { useEffect, useState, useCallback, useRef } from 'react';
@@ -22,7 +23,7 @@ import {
   Platform,
   LayoutAnimation,
   AppState,
-  Image,
+  Animated,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { WebView, WebViewNavigation } from 'react-native-webview';
@@ -32,17 +33,20 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Clipboard from 'expo-clipboard';
 import { useTheme, fontSizes, spacing } from '../../lib/design';
 import { getItems, saveUrl, deleteItem } from '../../lib/api';
-import { parseClipboardContent, getDomain } from '../../lib/clipboardUtils';
+import { parseClipboardContent } from '../../lib/clipboardUtils';
 import { Item } from '../../types';
 import { useAuth } from '../../context/AuthContext';
-import ManagementSection from '../../components/ManagementSection';
 import FeedItem from '../../components/FeedItem';
 import { ContentFetcher } from '../../components/ContentFetcher';
 import ProcessingIndicator from '../../components/ProcessingIndicator';
+import SideDrawer from '../../components/SideDrawer';
+import { getCachedItems, setCachedItems } from '../../lib/cache';
+import SkeletonItem from '../../components/SkeletonItem';
+import ErrorToast from '../../components/ErrorToast';
 
-const MAX_CONSUMPTION = 50; // Maximum items user can save
+const MAX_CONSUMPTION = 50;
+const MAX_PLATFORMS = 5;
 
-// JavaScript injected into the visible WebView to extract content in the background
 const VISIBLE_WEBVIEW_EXTRACT_SCRIPT = `
 (function() {
   try {
@@ -83,11 +87,24 @@ export default function FeedScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
+  // Drawer state
+  const [drawerOpen, setDrawerOpen] = useState(false);
+
+  // Search modal state
+  const [searchOpen, setSearchOpen] = useState(false);
+
+  // FAB visibility (scroll-aware)
+  const [fabVisible, setFabVisible] = useState(true);
+  const lastScrollY = React.useRef(0);
+  const scrollDir = React.useRef<'down' | 'up' | 'idle'>('idle');
+  const fabAnim = React.useRef(new Animated.Value(0)).current;
+  const scrollViewRef = React.useRef<ScrollView>(null);
+
   // Data state
   const [items, setItems] = useState<Item[]>([]);
-  const [platforms, setPlatforms] = useState<string[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [isRefreshingFromCache, setIsRefreshingFromCache] = useState(false);
 
   // Save modal state
   const [showSaveModal, setShowSaveModal] = useState(false);
@@ -98,7 +115,7 @@ export default function FeedScreen() {
   const [fetchedUrl, setFetchedUrl] = useState<string | null>(null);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
 
-  // Visible WebView modal state (for blocked platforms like 小红书)
+  // Visible WebView modal state
   const [showVisibleWebview, setShowVisibleWebview] = useState(false);
   const [visibleWebviewUrl, setVisibleWebviewUrl] = useState<string | null>(null);
   const [visibleWebviewLoading, setVisibleWebviewLoading] = useState(false);
@@ -108,27 +125,7 @@ export default function FeedScreen() {
   const [visibleWebviewSaving, setVisibleWebviewSaving] = useState(false);
   const [webviewExtractedContent, setWebviewExtractedContent] = useState<{ title: string; text: string } | null>(null);
 
-  // Check if URL is from a platform that blocks hidden WebView content extraction
-  const isBlockedPlatform = (url: string): boolean => {
-    try {
-      const hostname = new URL(url).hostname.toLowerCase();
-      return (
-        hostname.includes('xiaohongshu') ||
-        hostname.includes('xhslink') ||
-        hostname.includes('weixin') ||
-        hostname.includes('mp.weixin') ||
-        hostname.includes('wechat')
-      );
-    } catch {
-      return false;
-    }
-  };
-
-  // Clipboard preview modal state
-  const [showClipboardModal, setShowClipboardModal] = useState(false);
-  const [clipboardUrl, setClipboardUrl] = useState<string | null>(null);
-  const [clipboardTitle, setClipboardTitle] = useState<string | null>(null);
-  const [clipboardThumbnail, setClipboardThumbnail] = useState<string | null>(null);
+  // Clipboard tracking
   const lastClipboardRef = useRef<string | null>(null);
 
   // Processing indicator state
@@ -137,6 +134,12 @@ export default function FeedScreen() {
 
   // Menu state
   const [menuItemId, setMenuItemId] = useState<string | null>(null);
+
+  // Skeleton item state - for items being saved
+  const [savingItemUrl, setSavingItemUrl] = useState<string | null>(null);
+
+  // Error toast state
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   // Article viewer state
   const [viewerUrl, setViewerUrl] = useState<string | null>(null);
@@ -159,19 +162,22 @@ export default function FeedScreen() {
     return [...new Set(sources)];
   }, [items]);
 
-  const loadItems = useCallback(async () => {
+  const loadItems = useCallback(async (suppressError = false) => {
     try {
       const res = await getItems({ limit: 50 });
       setItems(res.items);
-      setPlatforms([...new Set(res.items.map((i) => i.source))]);
+      setCachedItems(res.items);
       setErrorMessage(null);
     } catch (e: any) {
-      console.error('Failed to load items:', e);
-      const msg = e?.message || '';
-      if (msg.includes('Failed to fetch') || msg.includes('Network')) {
-        setErrorMessage('Network error. Check your connection.');
-      } else {
-        setErrorMessage('Failed to load items.');
+      // Silently keep cached data when API fails (suppressError=true during init)
+      // Errors are suppressed when we have cached items to display
+      if (!suppressError) {
+        const msg = e?.message || '';
+        if (msg.includes('Failed to fetch') || msg.includes('Network')) {
+          setErrorMessage('Network error. Check your connection.');
+        } else {
+          setErrorMessage('Failed to load items.');
+        }
       }
     }
   }, []);
@@ -184,21 +190,31 @@ export default function FeedScreen() {
 
   useEffect(() => {
     setLoading(true);
-    const timer = setTimeout(() => {
-      loadItems().finally(() => setLoading(false));
-    }, 500);
-    return () => clearTimeout(timer);
+    // Load from cache first for immediate display
+    const init = async () => {
+      try {
+        const cached = await getCachedItems();
+        if (cached && cached.length > 0) {
+          setItems(cached);
+          setIsRefreshingFromCache(true);
+        }
+      } catch {
+        // Cache read failed, continue without cache
+      }
+      setLoading(false);
+      // Auto-refresh from API - pull down the scroll view to trigger refresh
+      setRefreshing(true);
+      try {
+        await loadItems(true);
+      } catch {
+        // API failed, will use cached data if available
+      } finally {
+        setRefreshing(false);
+        setIsRefreshingFromCache(false);
+      }
+    };
+    init();
   }, [loadItems]);
-
-  // Helper function to check if string is a valid URL
-  const isValidUrl = (text: string): boolean => {
-    try {
-      const url = new URL(text);
-      return url.protocol === 'http:' || url.protocol === 'https:';
-    } catch {
-      return false;
-    }
-  };
 
   // AppState listener - check clipboard when app comes to foreground
   useEffect(() => {
@@ -207,13 +223,13 @@ export default function FeedScreen() {
         const text = await Clipboard.getStringAsync();
         if (!text || text === lastClipboardRef.current) return;
 
-        const { url, title } = parseClipboardContent(text);
+        const { url } = parseClipboardContent(text);
         if (url) {
           lastClipboardRef.current = text;
-          setClipboardUrl(url);
-          setClipboardTitle(title);
-          setClipboardThumbnail(null);
-          setShowClipboardModal(true);
+          setUrlInput(url);
+          setFetchedUrl(null);
+          setErrorMessage(null);
+          setShowSaveModal(true);
         }
       } catch (e) {
         // Clipboard read failed, ignore
@@ -226,13 +242,19 @@ export default function FeedScreen() {
       }
     });
 
-    // Also check once on mount
     checkClipboard();
 
     return () => {
       subscription.remove();
     };
   }, []);
+
+  // Sync items to cache whenever they change
+  useEffect(() => {
+    if (items.length > 0) {
+      setCachedItems(items);
+    }
+  }, [items]);
 
   // Keyboard listener for modal
   useEffect(() => {
@@ -253,17 +275,34 @@ export default function FeedScreen() {
     };
   }, []);
 
+  const isBlockedPlatform = (url: string): boolean => {
+    try {
+      const hostname = new URL(url).hostname.toLowerCase();
+      return (
+        hostname.includes('xiaohongshu') ||
+        hostname.includes('xhslink') ||
+        hostname.includes('weixin') ||
+        hostname.includes('mp.weixin') ||
+        hostname.includes('wechat')
+      );
+    } catch {
+      return false;
+    }
+  };
+
   const handleSave = () => {
     if (!urlInput.trim()) return;
     const url = urlInput.trim();
 
-    // Close modal immediately, then determine how to fetch
+    // Close modal immediately and show skeleton + progress bar
     setShowSaveModal(false);
+    setUrlInput('');
     setErrorMessage(null);
+    setSavingItemUrl(url);
+    // Scroll to top to show skeleton placeholder (after state updates)
+    setTimeout(() => scrollViewRef.current?.scrollTo({ y: 0, animated: true }), 0);
 
-    // For blocked platforms (小红书, 微信, etc.), use visible WebView
     if (isBlockedPlatform(url)) {
-      setUrlInput('');
       setFetchedUrl(url);
       setVisibleWebviewUrl(url);
       setVisibleWebviewLoading(true);
@@ -272,7 +311,6 @@ export default function FeedScreen() {
       return;
     }
 
-    // Normal flow: use hidden ContentFetcher
     setFetchedUrl(url);
     setFetchingContent(true);
     setIsProcessing(true);
@@ -284,27 +322,21 @@ export default function FeedScreen() {
     setSaving(true);
     setProcessingMessage('Saving link...');
     try {
-      // Save the URL
       await saveUrl(fetchedUrl!, { content: content.text, contentType: 'text' });
 
-      // Get the new item to add to the list
       const res = await getItems({ limit: 50 });
       const newItem = res.items.find(i => i.url === fetchedUrl);
 
-      // Clear states
       setFetchedUrl(null);
-      setUrlInput('');
+      setSavingItemUrl(null);
 
-      // Hide processing indicator
       setIsProcessing(false);
       setProcessingMessage('');
 
       if (newItem) {
-        // Add new item at the top with LayoutAnimation
         LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
         setItems(prev => [newItem, ...prev]);
       } else {
-        // Fallback: just reload all items
         setItems(res.items);
       }
     } catch (e: any) {
@@ -312,20 +344,24 @@ export default function FeedScreen() {
       setProcessingMessage('');
       const code = (e as any).code;
       if (code === 'DUPLICATE') {
+        setSaveError('This link is already saved');
         setErrorMessage('This link is already saved');
       } else if (code === 'UNAUTHORIZED') {
+        setSaveError('Please sign in to save links');
         setErrorMessage('Please sign in to save links');
       } else if (code === 'AI_FAILED') {
+        setSaveError('Summary failed but link was saved.');
         setErrorMessage('Summary failed but link was saved.');
+        setSavingItemUrl(null);
         loadItems();
         return;
       } else {
+        setSaveError(e.message || 'Failed to save link');
         setErrorMessage(e.message || 'Failed to save link');
       }
       setFetchedUrl(null);
-      // Reopen modal on failure
+      setSavingItemUrl(null);
       setShowSaveModal(true);
-      setErrorMessage(e.message || 'Failed to save. Please try again.');
     } finally {
       setSaving(false);
     }
@@ -336,15 +372,12 @@ export default function FeedScreen() {
     setSaving(true);
     setProcessingMessage('Saving link...');
 
-    // Try to resolve short URL before falling back to backend
     let fallbackUrl = fetchedUrl!;
     let resolvedUrl: string | undefined;
 
     try {
-      // Follow redirects to get the real URL
       const response = await fetch(fallbackUrl, { method: 'HEAD', redirect: 'follow' });
       const finalUrl = response.url;
-      // Only use if it's different (i.e., was a short URL)
       if (finalUrl && finalUrl !== fallbackUrl) {
         resolvedUrl = finalUrl;
         fallbackUrl = finalUrl;
@@ -356,35 +389,33 @@ export default function FeedScreen() {
     setFetchedUrl(null);
     saveUrl(fallbackUrl, { resolvedUrl })
       .then(async () => {
-        // Get the new item to add to the list
-        // The item's url is the original (short) URL stored by backend
         const res = await getItems({ limit: 50 });
-        // Check against original short URL or resolved URL
         const newItem = res.items.find(i => i.url === fallbackUrl || (resolvedUrl && i.url === resolvedUrl));
 
         setUrlInput('');
         setIsProcessing(false);
         setProcessingMessage('');
+        setSavingItemUrl(null);
 
         if (newItem) {
-          // Add new item at the top with LayoutAnimation
           LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
           setItems(prev => [newItem, ...prev]);
         } else {
-          // Fallback: just reload all items
           setItems(res.items);
         }
       })
       .catch((e: any) => {
         setIsProcessing(false);
         setProcessingMessage('');
+        setSavingItemUrl(null);
         const code = (e as any).code;
         if (code === 'DUPLICATE') {
+          setSaveError('This link is already saved');
           setErrorMessage('This link is already saved');
         } else {
+          setSaveError(e.message || 'Failed to save link');
           setErrorMessage(e.message || 'Failed to save link');
         }
-        // Reopen modal on failure
         setShowSaveModal(true);
       })
       .finally(() => setSaving(false));
@@ -400,37 +431,30 @@ export default function FeedScreen() {
     }
   };
 
-  const getPlatformIcon = (source: string): string => {
-    const domain = source.toLowerCase();
-    if (domain.includes('xiaohongshu') || domain.includes('xhslink')) return 'bookmark';
-    if (domain.includes('mp.weixin') || domain.includes('weixin') || domain.includes('wechat')) return 'chat';
-    if (domain.includes('bilibili')) return 'play-circle-filled';
-    if (domain.includes('twitter') || domain.includes('x.com')) return 'tag';
-    if (domain.includes('youtube')) return 'smart-display';
-    if (domain.includes('instagram')) return 'camera-alt';
-    if (domain.includes('tiktok')) return 'music-note';
-    if (domain.includes('medium') || domain.includes('substack')) return 'edit';
-    if (domain.includes('reddit')) return 'forum';
-    if (domain.includes('news') || domain.includes('article')) return 'article';
-    if (domain.includes('blog')) return 'rss-feed';
-    return 'language';
-  };
-
+  // Close drawer when user navigates away
+  useEffect(() => {
+    if (!drawerOpen) return;
+    // Keep drawer state independent of other interactions
+  }, [drawerOpen]);
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      {/* Header */}
+      {/* Top Header - minimal, just menu icon + logo hint */}
       <View
         style={[
           styles.header,
           {
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
             paddingTop: insets.top + spacing.md,
-            backgroundColor: isDark ? 'rgba(28,27,31,0.85)' : 'rgba(252,249,242,0.85)',
-            borderBottomColor: colors.surfaceContainerLow,
+            backgroundColor: isDark ? 'rgb(28,27,31)' : 'rgb(252,249,242)',
+            height: insets.top + 50 + spacing.md,
           },
         ]}
       >
         <View style={styles.headerLeft}>
-          <TouchableOpacity>
+          <TouchableOpacity onPress={() => setDrawerOpen(true)}>
             <MaterialIcons name="menu" size={24} color={colors.primary} />
           </TouchableOpacity>
         </View>
@@ -447,7 +471,37 @@ export default function FeedScreen() {
         <ProcessingIndicator message={processingMessage || 'Processing...'} />
       )}
 
+      {/* Error Toast - slides in from left */}
+      <ErrorToast
+        message={saveError || ''}
+        visible={!!saveError}
+        onDismiss={() => setSaveError(null)}
+        duration={4000}
+      />
+
+      {/* Refresh Header - shows during pull-to-refresh or auto-refresh */}
+      {(refreshing || isRefreshingFromCache) && (
+        <View style={{
+          position: 'absolute',
+          top: insets.top + 50,
+          left: 0,
+          right: 0,
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: spacing.sm,
+          paddingVertical: spacing.sm,
+          zIndex: 100,
+        }}>
+          <ActivityIndicator size="small" color={colors.primary} />
+          <Text style={{ fontSize: fontSizes.sm, fontWeight: '500', color: colors.onSurfaceVariant }}>
+            Refreshing...
+          </Text>
+        </View>
+      )}
+
       <ScrollView
+        ref={scrollViewRef}
         style={{ flex: 1 }}
         contentContainerStyle={styles.content}
         refreshControl={
@@ -458,25 +512,58 @@ export default function FeedScreen() {
           />
         }
         showsVerticalScrollIndicator={false}
+        onScroll={(e) => {
+          const y = e.nativeEvent.contentOffset.y;
+          const delta = y - lastScrollY.current;
+
+          if (Math.abs(delta) > 4) {
+            const newDir = delta > 0 ? 'down' : 'up';
+
+            if (y > 60) {
+              if (newDir === 'down' && scrollDir.current !== 'down') {
+                scrollDir.current = 'down';
+                Animated.timing(fabAnim, {
+                  toValue: 1,
+                  duration: 250,
+                  useNativeDriver: true,
+                }).start();
+              } else if (newDir === 'up' && scrollDir.current !== 'up') {
+                scrollDir.current = 'up';
+                Animated.timing(fabAnim, {
+                  toValue: 0,
+                  duration: 250,
+                  useNativeDriver: true,
+                }).start();
+              }
+            } else if (y < 30) {
+              if (scrollDir.current !== 'up') {
+                scrollDir.current = 'up';
+                Animated.timing(fabAnim, {
+                  toValue: 0,
+                  duration: 250,
+                  useNativeDriver: true,
+                }).start();
+              }
+            }
+          }
+          lastScrollY.current = y;
+        }}
+        scrollEventThrottle={16}
       >
-        {/* Management Section */}
-        <ManagementSection
-          currentCount={items.length}
-          maxCount={MAX_CONSUMPTION}
-          platformCount={uniquePlatforms.length}
-          platformIcons={uniquePlatforms.map(getPlatformIcon)}
-        />
+        {/* Skeleton item for saving in progress */}
+        {savingItemUrl && <SkeletonItem url={savingItemUrl} />}
 
         {/* Feed Items */}
-        {items.map((item) => (
+        {items.map((item, index) => (
           <FeedItem
             key={item.id}
             item={item}
             hasImage={!!item.thumbnail_url}
             imageUrl={item.thumbnail_url}
             onPress={() => {
-              setViewerUrl(item.url);
-              setViewerTitle(item.title);
+              // Set global store so SummaryScreen can access the full items list
+              (global as any).__noox_summary_items__ = items;
+              router.push(`/summary?itemId=${encodeURIComponent(item.id)}`);
             }}
             onDelete={() => handleDelete(item.id)}
           />
@@ -519,82 +606,110 @@ export default function FeedScreen() {
             <Text style={[styles.emptySubtitle, { color: colors.onSurfaceVariant }]}>
               {errorMessage}
             </Text>
-            <TouchableOpacity style={styles.retryBtn} onPress={loadItems}>
+            <TouchableOpacity style={styles.retryBtn} onPress={() => loadItems(false)}>
               <Text style={styles.retryBtnText}>Retry</Text>
             </TouchableOpacity>
           </View>
         )}
 
-        {/* Bottom padding for tab bar */}
-        <View style={{ height: 100 }} />
+        {/* Bottom padding */}
+        <View style={{ height: 80 }} />
       </ScrollView>
 
-      {/* Clipboard Preview Modal */}
-      <Modal visible={showClipboardModal} transparent animationType="fade">
-        <Pressable
-          style={styles.modalOverlay}
-          onPress={() => setShowClipboardModal(false)}
+      {/* Floating Search Button */}
+      <Animated.View
+        style={[
+          styles.fabContainer,
+          {
+            bottom: insets.bottom + spacing.xl,
+            opacity: fabAnim.interpolate({
+              inputRange: [0, 1],
+              outputRange: [1, 0],
+            }),
+            transform: [
+              {
+                translateY: fabAnim.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [0, 80],
+                }),
+              },
+            ],
+          },
+        ]}
+      >
+        <TouchableOpacity
+          style={[styles.fab, { backgroundColor: colors.primary }]}
+          onPress={() => setSearchOpen(true)}
+          activeOpacity={0.8}
         >
-          <Pressable
-            style={[styles.clipboardModalContent, { backgroundColor: colors.surface }]}
-            onPress={() => {}}
+          <MaterialIcons name="search" size={28} color={colors.onPrimary} />
+        </TouchableOpacity>
+      </Animated.View>
+
+      {/* Side Drawer */}
+      <SideDrawer
+        visible={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        currentCount={items.length}
+        maxCount={MAX_CONSUMPTION}
+        platformCount={uniquePlatforms.length}
+        platformSources={uniquePlatforms}
+      />
+
+      {/* Search Modal */}
+      <Modal
+        visible={searchOpen}
+        animationType="slide"
+        presentationStyle="fullScreen"
+        onRequestClose={() => setSearchOpen(false)}
+      >
+        <View style={[styles.searchModalContainer, { backgroundColor: colors.background }]}>
+          {/* Search Header */}
+          <View
+            style={[
+              styles.searchHeader,
+              {
+                paddingTop: insets.top + spacing.md,
+                backgroundColor: isDark ? 'rgba(28,27,31,0.85)' : 'rgba(252,249,242,0.85)',
+              },
+            ]}
           >
-            <View style={styles.clipboardHeader}>
-              <Text style={[styles.clipboardTitle, { color: colors.onSurface }]}>
-                I found some content
-              </Text>
-            </View>
-
-            {clipboardThumbnail && (
-              <View style={styles.clipboardImageWrapper}>
-                <Image
-                  source={{ uri: clipboardThumbnail }}
-                  style={styles.clipboardImage}
-                  resizeMode="cover"
-                />
-              </View>
-            )}
-
-            <View style={styles.clipboardContent}>
-              {clipboardTitle ? (
-                <>
-                  <Text style={[styles.clipboardItemTitle, { color: colors.onSurface }]}>
-                    {clipboardTitle}
-                  </Text>
-                  <Text style={[styles.clipboardItemUrl, { color: colors.onSurfaceVariant }]}>
-                    {getDomain(clipboardUrl!)}
-                  </Text>
-                </>
-              ) : (
-                <Text style={[styles.clipboardItemUrl, { color: colors.onSurface }]}>
-                  {clipboardUrl}
-                </Text>
-              )}
-            </View>
-
             <TouchableOpacity
-              style={[styles.clipboardSaveBtn, { backgroundColor: colors.primary }]}
-              onPress={() => {
-                setUrlInput(clipboardUrl!);
-                setShowClipboardModal(false);
-                setShowSaveModal(true);
-              }}
+              onPress={() => setSearchOpen(false)}
+              style={{ width: 40 }}
             >
-              <Text style={[styles.clipboardSaveBtnText, { color: colors.onPrimary }]}>
-                Save
-              </Text>
+              <MaterialIcons name="close" size={24} color={colors.onSurface} />
             </TouchableOpacity>
+            <Text style={[styles.searchTitle, { color: colors.onSurface }]}>Search</Text>
+            <View style={{ width: 40 }} />
+          </View>
 
-            <TouchableOpacity
-              style={styles.clipboardCancelBtn}
-              onPress={() => setShowClipboardModal(false)}
+          {/* Search Input */}
+          <View style={styles.searchInputRow}>
+            <View
+              style={[
+                styles.searchInputWrapper,
+                { backgroundColor: colors.surfaceContainerLow },
+              ]}
             >
-              <Text style={[styles.clipboardCancelText, { color: colors.onSurfaceVariant }]}>
-                Cancel
-              </Text>
-            </TouchableOpacity>
-          </Pressable>
-        </Pressable>
+              <MaterialIcons name="search" size={20} color={colors.onSurfaceVariant} />
+              <TextInput
+                style={[styles.searchInput, { color: colors.onSurface }]}
+                placeholder="Search your library..."
+                placeholderTextColor={colors.onSurfaceVariant}
+                autoFocus
+              />
+            </View>
+          </View>
+
+          {/* Placeholder for search results */}
+          <View style={styles.searchPlaceholder}>
+            <MaterialIcons name="search" size={48} color={colors.outlineVariant} />
+            <Text style={[styles.searchHint, { color: colors.onSurfaceVariant }]}>
+              Start typing to search
+            </Text>
+          </View>
+        </View>
       </Modal>
 
       {/* Save Modal */}
@@ -740,7 +855,6 @@ export default function FeedScreen() {
       </Modal>
 
       {/* Content Fetcher - only for non-blocked platforms */}
-      {/* For blocked platforms (小红书, 微信), we show visible WebView instead */}
       {!isBlockedPlatform(fetchedUrl || '') && (
         <ContentFetcher
           url={fetchedUrl}
@@ -774,7 +888,6 @@ export default function FeedScreen() {
         }}
       >
         <View style={[styles.viewerContainer, { backgroundColor: isDark ? '#000' : '#fff' }]}>
-          {/* Header with save button */}
           <View
             style={[
               styles.viewerHeader,
@@ -821,15 +934,13 @@ export default function FeedScreen() {
                 if (visibleWebviewSaving) return;
                 setVisibleWebviewSaving(true);
 
-                // Close WebView immediately
                 setShowVisibleWebview(false);
                 setVisibleWebviewUrl(null);
+                setSavingItemUrl(fetchedUrl!);
 
-                // Show processing indicator on main screen
                 setIsProcessing(true);
                 setProcessingMessage('Saving link...');
 
-                // Use pre-extracted content if available, otherwise just save URL
                 const extracted = webviewExtractedContent;
                 const saveOptions = extracted && extracted.text.trim().length > 0
                   ? { content: extracted.text, contentType: 'text' as const }
@@ -845,6 +956,7 @@ export default function FeedScreen() {
                     setFetchedUrl(null);
                     setWebviewExtractedContent(null);
                     setUrlInput('');
+                    setSavingItemUrl(null);
                     if (newItem) {
                       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
                       setItems(prev => [newItem, ...prev]);
@@ -856,10 +968,13 @@ export default function FeedScreen() {
                     setVisibleWebviewSaving(false);
                     setIsProcessing(false);
                     setProcessingMessage('');
+                    setSavingItemUrl(null);
                     const code = (e as any).code;
                     if (code === 'DUPLICATE') {
+                      setSaveError('This link is already saved');
                       setErrorMessage('This link is already saved');
                     } else {
+                      setSaveError(e.message || 'Failed to save');
                       setErrorMessage(e.message || 'Failed to save');
                     }
                     setFetchedUrl(null);
@@ -874,12 +989,10 @@ export default function FeedScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* Loading indicator */}
           {visibleWebviewLoading && (
             <View style={[styles.webviewLoadingBar, { backgroundColor: colors.primary }]} />
           )}
 
-          {/* WebView */}
           <View style={styles.viewerWebview}>
             {visibleWebviewUrl && (
               <WebView
@@ -900,12 +1013,10 @@ export default function FeedScreen() {
                   setVisibleWebviewCanGoBack(navState.canGoBack);
                   setVisibleWebviewCanGoForward(navState.canGoForward);
                   setVisibleWebviewLoading(navState.loading);
-                  // Reset extraction state on navigation
                   setWebviewExtractedContent(null);
                 }}
                 onLoadEnd={() => {
                   setVisibleWebviewLoading(false);
-                  // Inject extraction script when page finishes loading
                   visibleWebviewRef.current?.injectJavaScript(VISIBLE_WEBVIEW_EXTRACT_SCRIPT);
                 }}
                 onError={() => {
@@ -921,7 +1032,6 @@ export default function FeedScreen() {
             )}
           </View>
 
-          {/* Toolbar */}
           <View
             style={[
               styles.viewerToolbar,
@@ -979,7 +1089,6 @@ export default function FeedScreen() {
         onRequestClose={() => setViewerUrl(null)}
       >
         <View style={[styles.viewerContainer, { backgroundColor: isDark ? '#000' : '#fff' }]}>
-          {/* Viewer Header */}
           <View
             style={[
               styles.viewerHeader,
@@ -1011,7 +1120,6 @@ export default function FeedScreen() {
             )}
           </View>
 
-          {/* WebView */}
           <View style={styles.viewerWebview}>
             {viewerUrl && (
               <WebView
@@ -1021,8 +1129,6 @@ export default function FeedScreen() {
                   setCanGoBack(navState.canGoBack);
                   setCanGoForward(navState.canGoForward);
                   setViewerLoading(navState.loading);
-                  // Only update title if WebView provides a meaningful one (> 3 chars),
-                  // to avoid overwriting the saved item's title with generic platform names
                   if (navState.title && navState.title.length > 3) {
                     setViewerTitle(navState.title);
                   }
@@ -1040,7 +1146,6 @@ export default function FeedScreen() {
             )}
           </View>
 
-          {/* Viewer Toolbar */}
           <View
             style={[
               styles.viewerToolbar,
@@ -1113,7 +1218,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: spacing.lg,
     paddingBottom: spacing.md,
-    borderBottomWidth: 1,
+    zIndex: 99,
   },
   headerLeft: {
     width: 40,
@@ -1129,7 +1234,7 @@ const styles = StyleSheet.create({
   },
   content: {
     paddingHorizontal: spacing.xl,
-    paddingTop: spacing.xl,
+    paddingTop: 120,
     paddingBottom: spacing['3xl'],
   },
   centered: {
@@ -1161,6 +1266,74 @@ const styles = StyleSheet.create({
   retryBtnText: {
     fontWeight: '600',
     fontSize: fontSizes.md,
+  },
+
+  // FAB
+  fabContainer: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    zIndex: 50,
+  },
+  fab: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 5,
+  },
+
+  // Search Modal
+  searchModalContainer: {
+    flex: 1,
+  },
+  searchHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(216,194,187,0.15)',
+  },
+  searchTitle: {
+    flex: 1,
+    fontSize: fontSizes['2xl'],
+    fontWeight: '700',
+    letterSpacing: 2,
+    textAlign: 'center',
+  },
+  searchInputRow: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
+  },
+  searchInputWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    borderRadius: 16,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: fontSizes.md,
+  },
+  searchPlaceholder: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: spacing.md,
+    paddingBottom: spacing['3xl'],
+  },
+  searchHint: {
+    fontSize: fontSizes.md,
+    textAlign: 'center',
   },
 
   // Modal
@@ -1369,4 +1542,19 @@ const styles = StyleSheet.create({
   clipboardCancelText: {
     fontSize: fontSizes.sm,
   },
+  // Cache refresh indicator — now handled by refreshHeader
+  cachedIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.md,
+    marginTop: spacing.md,
+    marginHorizontal: spacing.xl,
+    borderRadius: 12,
+  },
+  cachedText: {
+    fontSize: fontSizes.sm,
+  },
+
 });

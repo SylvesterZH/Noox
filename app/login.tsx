@@ -5,8 +5,6 @@ import {
   TextInput,
   TouchableOpacity,
   StyleSheet,
-  KeyboardAvoidingView,
-  Platform,
   Alert,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -77,10 +75,7 @@ export default function LoginScreen() {
   };
 
   return (
-    <KeyboardAvoidingView
-      style={[styles.container, { backgroundColor: colors.background }]}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-    >
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Header */}
       <View style={[styles.header, { paddingTop: insets.top + spacing.lg }]}>
         <Text style={[styles.logo, { color: colors.primary }]}>NOOX</Text>
@@ -173,7 +168,7 @@ export default function LoginScreen() {
 
       {/* Bottom padding */}
       <View style={{ height: insets.bottom + spacing.xl }} />
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 
@@ -196,7 +191,7 @@ const styles = StyleSheet.create({
     marginTop: spacing.xs,
   },
   card: {
-    marginHorizontal: spacing.xl,
+    marginHorizontal: spacing.md,
     backgroundColor: 'transparent',
     gap: spacing.md,
   },
