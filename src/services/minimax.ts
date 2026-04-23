@@ -217,9 +217,15 @@ export async function generateDetailedSummary(
 
   // Step 0: Remove thinking/reasoning tags if present
   let cleanText = text
-    .replace(/<[^>]*>/g, '') // Remove all XML/HTML tags like <think> etc
+    .replace(/<\/?[a-z]+>/gi, '') // Remove HTML-like tags like <think> etc
     .replace(/\[\/?[^\]]+\]/g, '') // Remove markdown-style tags
+    .replace(/^</think>/m, '') // Remove leading </think> if on its own line
+    .replace(/^<think>/m, '') // Remove leading <think> if on its own line
+    .replace(/<\/思考>$/m, '') // Remove trailing </思考>
+    .replace(/<思考>$/m, '') // Remove trailing <思考>
     .trim();
+
+  console.log('[generateDetailedSummary] cleanText preview:', cleanText.substring(0, 300));
 
   // Try to parse JSON from the response
   try {
@@ -253,48 +259,56 @@ export async function generateDetailedSummary(
   try {
     let overview = '';
     let details: string[] = [];
+    let currentPhase: 'overview' | 'details' | 'none' = 'none';
+    let currentContent = '';
 
-    // Split by markdown headers ## 概要 / ## 详述
+    // Split by lines and process
     const lines = cleanText.split('\n');
-    let currentSection = '';
-    let inOverview = false;
-    let inDetails = false;
-
     for (const line of lines) {
       const trimmed = line.trim();
-      // Check for section headers (case insensitive, with or without ##)
-      const isOverviewHeader = /^(?:\*\*)?(?:概要|Summary)(?:\*\*)?$/i.test(trimmed);
-      const isDetailsHeader = /^(?:\*\*)?(?:详述|Details)(?:\*\*)?$/i.test(trimmed);
+      if (!trimmed) continue;
 
-      if (isOverviewHeader) {
-        inOverview = true;
-        inDetails = false;
+      // Check for section headers - handle ## prefix and optional **bold**
+      // Match "## 概要", "概要", "**概要**", "## **概要**" etc.
+      const overviewHeaderMatch = trimmed.match(/^##?\s*\**?(?:概要|Summary)\**?\s*$/i);
+      const detailsHeaderMatch = trimmed.match(/^##?\s*\**?(?:详述|Details)\**?\s*$/i);
+
+      if (overviewHeaderMatch) {
+        currentPhase = 'overview';
+        if (currentContent && !overview) {
+          overview = currentContent.trim();
+        }
+        currentContent = '';
         continue;
       }
-      if (isDetailsHeader) {
-        inOverview = false;
-        inDetails = true;
+
+      if (detailsHeaderMatch) {
+        currentPhase = 'details';
+        if (currentContent && !overview) {
+          overview = currentContent.trim();
+        }
+        currentContent = '';
         continue;
       }
 
-      if (inOverview && trimmed) {
-        currentSection += (currentSection ? '\n' : '') + trimmed;
+      // If we're in overview phase, accumulate content
+      if (currentPhase === 'overview') {
+        currentContent += (currentContent ? '\n' : '') + trimmed;
       }
-      if (inDetails && trimmed) {
-        currentSection += (currentSection ? '\n' : '') + trimmed;
+      // If we're in details phase, accumulate content
+      if (currentPhase === 'details') {
+        currentContent += (currentContent ? '\n' : '') + trimmed;
       }
     }
 
-    overview = currentSection;
+    // Last section content
+    if (currentContent && !overview && currentPhase === 'details') {
+      // details content already captured
+    }
 
-    // Now parse details from the details section
-    // Find the details section content
-    const detailsStartMatch = cleanText.match(/(?:^|\n)(?:##\s*)?(?:详述|Details)(?:.*?)(?:\n|$)([\s\S]*?)(?=^##|\n\n\n|$)/im);
-    const detailsContent = detailsStartMatch ? detailsStartMatch[1] : '';
-
-    // Extract bullet points from details content
+    // Parse details from accumulated content
     // Support: "- item", "- **bold**：item", "1. item", "1、item"
-    const bulletMatches = detailsContent.match(/(?:^|\n)\s*[-*]\s+(.+?)(?:\n|$)/gm);
+    const bulletMatches = currentContent.match(/(?:^|\n)\s*[-*]\s+(.+?)(?:\n|$)/gm);
     if (bulletMatches) {
       for (const m of bulletMatches) {
         const item = m.replace(/^[-*]\s+/, '').replace(/\*\*([^*]+)\*\*[:：]\s*/g, '$1：').trim();
@@ -304,7 +318,7 @@ export async function generateDetailedSummary(
 
     // Try numbered list if no bullets found
     if (details.length === 0) {
-      const numberedMatches = detailsContent.match(/(?:^|\n)\s*(\d+[.、]\s*)(.+?)(?:\n|$)/gm);
+      const numberedMatches = currentContent.match(/(?:^|\n)\s*(\d+[.、]\s*)(.+?)(?:\n|$)/gm);
       if (numberedMatches) {
         for (const m of numberedMatches) {
           const numMatch = m.match(/(\d+[.、]\s*)(.+?)(?:\n|$)/);
@@ -315,35 +329,16 @@ export async function generateDetailedSummary(
       }
     }
 
-    // Alternative: if no structured format found, try to extract overview from "概要：" pattern
-    if (!overview) {
-      const overviewMatch = cleanText.match(/(?:概要|Summary)[:：]\s*([\s\S]*?)(?:\n\n|\n##|$)/i);
-      if (overviewMatch && overviewMatch[1]) {
-        overview = overviewMatch[1].trim();
-      }
-    }
-
-    // Try to extract details from inline format "详述：" followed by content
+    // If still no details, try alternative: split by "详述" keyword and get everything after it
     if (details.length === 0) {
-      const detailsMatch = cleanText.match(/(?:详述|Details)[:：]\s*([\s\S]*?)$/i);
-      if (detailsMatch && detailsMatch[1]) {
-        const content = detailsMatch[1];
-        // Extract bullets
-        const bullets = content.match(/[-*]\s+(.+?)(?:\n|$)/g);
-        if (bullets) {
-          for (const b of bullets) {
-            const item = b.replace(/^[-*]\s+/, '').replace(/\*\*([^*]+)\*\*[:：]\s*/g, '$1：').trim();
+      const afterDetailsMatch = cleanText.match(/(?:详述|Details)[:：]?\s*([\s\S]*?)$/i);
+      if (afterDetailsMatch && afterDetailsMatch[1]) {
+        const extraContent = afterDetailsMatch[1];
+        const extraBullets = extraContent.match(/(?:^|\n)\s*[-*]\s+(.+?)(?:\n|$)/gm);
+        if (extraBullets) {
+          for (const m of extraBullets) {
+            const item = m.replace(/^[-*]\s+/, '').trim();
             if (item) details.push(item);
-          }
-        }
-        // Extract numbered items
-        if (details.length === 0) {
-          const numbered = content.match(/(\d+[.、]\s*)(.+?)(?:\n|$)/g);
-          if (numbered) {
-            for (const n of numbered) {
-              const match = n.match(/(\d+[.、]\s*)(.+?)(?:\n|$)/);
-              if (match && match[2]) details.push(match[2].trim());
-            }
           }
         }
       }
