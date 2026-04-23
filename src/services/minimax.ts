@@ -76,36 +76,86 @@ export async function generateSummary(env: Env, content: string): Promise<Summar
   return { summary: content.substring(0, 150) + '...', tags: [] };
 }
 
-export interface DetailedSummaryResult {
+export interface OverviewResult {
   overview: string;
+}
+
+export interface DetailsResult {
   details: string[];
 }
 
-function buildDetailedPrompt(content: string, lang: string): string {
-  // Language-specific output
-  const outputs: Record<string, { summaryTitle: string; detailsTitle: string; label: string }> = {
-    zh: { summaryTitle: '概要', detailsTitle: '详述', label: '简体中文' },
-    ja: { summaryTitle: '概要', detailsTitle: '詳述', label: '日本語' },
-    ko: { summaryTitle: '概要', detailsTitle: '詳述', label: '한국어' },
-    en: { summaryTitle: 'Summary', detailsTitle: 'Details', label: 'English' },
-    multilingual: { summaryTitle: 'Summary', detailsTitle: 'Details', label: 'English' },
+function buildOverviewPrompt(content: string, lang: string): string {
+  const langMap: Record<string, { title: string; label: string }> = {
+    zh: { title: '概要', label: '简体中文' },
+    zh_TW: { title: '概要', label: '繁體中文' },
+    ja: { title: '概要', label: '日本語' },
+    ko: { title: '概要', label: '한국어' },
+    pt: { title: 'Resumo', label: 'Português' },
+    es: { title: 'Resumen', label: 'Español' },
+    fr: { title: 'Résumé', label: 'Français' },
+    de: { title: 'Zusammenfassung', label: 'Deutsch' },
+    en: { title: 'Summary', label: 'English' },
   };
-  const { summaryTitle, detailsTitle, label } = outputs[lang] || outputs['en'];
+  const { title, label } = langMap[lang] || langMap['en'];
 
-  // Short, direct prompt - no verbose instructions
-  return `请用${label}输出以下JSON格式（不要包含任何其他文字）：
-{"${summaryTitle}":"2-3句概括","${detailsTitle}":["要点1","要点2","要点3"]}
+  return `# 角色设定
+你是一个专业、高效的"核心信息提炼专家"。你的目标是从繁杂的文本中提炼出最核心的概要，帮助用户在几秒钟内把握文章主旨。
 
-严格控制总长度在800字符以内。只输出JSON，不要解释。
+# 核心任务
+1. 绝对语言镜像：自动识别输入文章的语种。你的所有输出内容必须与原文语言完全一致。
+2. 提炼概要：用精炼的 2-3 句话概括文章的核心目的、主要背景或最终结论。
 
-文章内容：
-${content.substring(0, 3000)}`;
+# 严格约束条件
+1. 长度限制：总长度严格控制在 300 个字符以内。
+2. 客观中立：忠于原文，绝对不添加任何个人评判或推测。
+3. 拒绝废话：不输出任何多余的开头寒暄，直接输出JSON。
+
+# 输出格式
+请用${label}输出以下JSON格式，不要包含任何其他文字：
+{"${title}":"[2-3句概括]"}
+
+# 用户输入
+请提炼以下内容的概要：
+${content.substring(0, 2000)}`;
 }
 
-export async function generateDetailedSummary(env: Env, content: string): Promise<DetailedSummaryResult> {
-  const lang = detectLanguage(content);
-  const prompt = buildDetailedPrompt(content, lang);
+function buildDetailsPrompt(content: string, lang: string): string {
+  const langMap: Record<string, { title: string; label: string }> = {
+    zh: { title: '详述', label: '简体中文' },
+    zh_TW: { title: '詳述', label: '繁體中文' },
+    ja: { title: '詳述', label: '日本語' },
+    ko: { title: '詳述', label: '한국어' },
+    pt: { title: 'Detalhes', label: 'Português' },
+    es: { title: 'Detalles', label: 'Español' },
+    fr: { title: 'Détails', label: 'Français' },
+    de: { title: 'Details', label: 'Deutsch' },
+    en: { title: 'Details', label: 'English' },
+  };
+  const { title, label } = langMap[lang] || langMap['en'];
 
+  return `# 角色设定
+你是一个专业、高效的"核心信息提炼专家"。你的目标是深度萃取文章中的高价值细节，帮助用户进行高效的结构化扫读。
+
+# 核心任务
+1. 绝对语言镜像：自动识别输入文章的语种。你的所有输出内容必须与原文语言完全一致。
+2. 提取详述：剔除冗余的背景铺垫、过渡句和无关细节，仅保留文章的绝对核心观点或有价值的数据。
+
+# 严格约束条件
+1. 数量限制：必须提取 3-8 条最具价值的核心信息或逻辑脉络。
+2. 长度限制：输出总长度严格控制在 800 个字符以内。
+3. 客观中立：忠于原文，绝对不添加任何个人评判或推测。
+4. 拒绝废话：不输出任何多余的开头寒暄，直接输出JSON。
+
+# 输出格式
+请用${label}输出以下JSON格式，不要包含任何其他文字：
+{"${title}":["[要点1]","[要点2]","[要点3]","[要点4]"]}
+
+# 用户输入
+请提取以下内容的详述要点：
+${content.substring(0, 2000)}`;
+}
+
+async function callMinimax(prompt: string, env: Env): Promise<string> {
   const MINIMAX_BASE_URL = 'https://api.minimaxi.com/v1';
   const MINIMAX_MODEL = 'MiniMax-M2.7';
 
@@ -118,7 +168,7 @@ export async function generateDetailedSummary(env: Env, content: string): Promis
     body: JSON.stringify({
       model: MINIMAX_MODEL,
       messages: [{ role: 'user', content: prompt }],
-      temperature: 0.3, // Lower temp for more consistent output
+      temperature: 0.3,
       max_tokens: 1500,
     }),
   });
@@ -129,61 +179,91 @@ export async function generateDetailedSummary(env: Env, content: string): Promis
   }
 
   const data = await response.json();
-  const text = data.choices?.[0]?.message?.content || '';
+  return data.choices?.[0]?.message?.content || '';
+}
 
-  console.log('[generateDetailedSummary] raw response:', text.substring(0, 300));
-
-  // Clean the response - remove thinking tags
+function parseOverview(text: string): string {
+  // Remove thinking tags and extra whitespace
   let clean = text.replace(/<[^>]+>/g, '').replace(/\[[^\]]*\]\s*/g, '').trim();
 
-  // Try to find and parse JSON
-  const jsonMatch = clean.match(/\{[\s\S]*\}/);
+  // Try JSON parsing
+  const jsonMatch = clean.match(/\{[\s\S]*?\}/);
   if (jsonMatch) {
     try {
       const parsed = JSON.parse(jsonMatch[0]);
-      // Try all possible key combinations
-      const summaryTitles = ['概要', 'Summary', 'summary', 'overview', 'Overview'];
-      const detailsTitles = ['详述', 'Details', 'details', '詳述'];
-
-      let overview = '';
-      for (const key of summaryTitles) {
+      // Try all possible overview key names across languages
+      const keys = ['概要', '概要', '詳述', 'Summary', 'Resumo', 'Resumen', 'Résumé', 'Zusammenfassung', 'summary', 'overview', 'Overview'];
+      for (const key of keys) {
         if (parsed[key] && typeof parsed[key] === 'string') {
-          overview = parsed[key];
-          break;
+          const val = parsed[key].trim();
+          // Reject if it looks like article content (too long)
+          if (val.length > 500) continue;
+          return val;
         }
       }
-
-      let details: string[] = [];
-      for (const key of detailsTitles) {
-        if (Array.isArray(parsed[key])) {
-          details = parsed[key].slice(0, 8);
-          break;
-        }
-      }
-
-      // If overview is too long (likely article content instead of summary), skip
-      if (overview.length > 500) {
-        overview = '';
-      }
-
-      if (overview || details.length > 0) {
-        console.log('[generateDetailedSummary] JSON parsed OK, overview len:', overview.length, 'details:', details.length);
-        return {
-          overview: overview || content.substring(0, 150) + '...',
-          details,
-        };
-      }
-    } catch (e) {
-      console.error('[generateDetailedSummary] JSON parse error:', e);
-    }
+    } catch { /* fall through */ }
   }
 
-  // If JSON parsing failed, return fallback
-  console.log('[generateDetailedSummary] parsing failed, fallback');
-  return {
-    overview: content.substring(0, 150) + '...',
-    details: [],
-  };
+  return '';
+}
+
+function parseDetails(text: string): string[] {
+  let clean = text.replace(/<[^>]+>/g, '').replace(/\[[^\]]*\]\s*/g, '').trim();
+
+  const jsonMatch = clean.match(/\{[\s\S]*?\}/);
+  if (jsonMatch) {
+    try {
+      const parsed = JSON.parse(jsonMatch[0]);
+      const keys = ['详述', '詳述', 'Details', 'Detalhes', 'Detalles', 'Détails', 'Details', 'details'];
+      for (const key of keys) {
+        if (Array.isArray(parsed[key])) {
+          return parsed[key]
+            .filter((v: unknown) => typeof v === 'string')
+            .map((v: string) => v.trim())
+            .filter(Boolean)
+            .slice(0, 8);
+        }
+      }
+    } catch { /* fall through */ }
+  }
+
+  return [];
+}
+
+export async function generateOverview(env: Env, content: string): Promise<OverviewResult> {
+  const lang = detectLanguage(content);
+  const prompt = buildOverviewPrompt(content, lang);
+
+  const text = await callMinimax(prompt, env);
+  console.log('[generateOverview] raw response:', text.substring(0, 300));
+
+  const overview = parseOverview(text);
+
+  if (overview) {
+    console.log('[generateOverview] parsed OK, len:', overview.length);
+    return { overview };
+  }
+
+  console.log('[generateOverview] parsing failed, fallback');
+  return { overview: content.substring(0, 150) + '...' };
+}
+
+export async function generateDetails(env: Env, content: string): Promise<DetailsResult> {
+  const lang = detectLanguage(content);
+  const prompt = buildDetailsPrompt(content, lang);
+
+  const text = await callMinimax(prompt, env);
+  console.log('[generateDetails] raw response:', text.substring(0, 300));
+
+  const details = parseDetails(text);
+
+  if (details.length > 0) {
+    console.log('[generateDetails] parsed OK, count:', details.length);
+    return { details };
+  }
+
+  console.log('[generateDetails] parsing failed, fallback');
+  return { details: [] };
 }
 
 export async function generateTitle(env: Env, content: string, lang: string = 'en'): Promise<TitleResult> {

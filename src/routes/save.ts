@@ -1,6 +1,6 @@
 import { Env } from '../index';
 import { fetchPage, extractDomain, parseMarkdown, parseHtmlContent, extractTitleFromText, isNoiseTitle } from '../services/jina';
-import { generateSummary, generateTitle, generateDetailedSummary } from '../services/minimax';
+import { generateSummary, generateTitle, generateOverview, generateDetails } from '../services/minimax';
 import { insertItem, checkDuplicate } from '../services/supabase';
 import { requireUser } from '../services/auth';
 
@@ -121,20 +121,24 @@ export async function handleSave(request: Request, env: Env): Promise<Response> 
 
     // Generate AI summary — skip if no content available
     let summaryResult;
-    let detailedSummaryResult;
+    let overviewResult;
+    let detailsResult;
     if (!parsed.content || parsed.content.trim().length === 0) {
       // No content to summarize (blocked/private page) — save with empty summaries
       summaryResult = { summary: '', tags: [] };
-      detailedSummaryResult = { overview: '', details: [] };
+      overviewResult = { overview: '' };
+      detailsResult = { details: [] };
     } else {
       try {
-        // Generate both brief summary and detailed summary in parallel
-        const [summaryRes, detailedRes] = await Promise.all([
+        // Generate brief summary, overview, and details in parallel
+        const [summaryRes, overviewRes, detailsRes] = await Promise.all([
           generateSummary(env, parsed.content),
-          generateDetailedSummary(env, parsed.content),
+          generateOverview(env, parsed.content),
+          generateDetails(env, parsed.content),
         ]);
         summaryResult = summaryRes;
-        detailedSummaryResult = detailedRes;
+        overviewResult = overviewRes;
+        detailsResult = detailsRes;
       } catch (err) {
         console.error('AI summary failed:', err);
         return new Response(
@@ -143,6 +147,11 @@ export async function handleSave(request: Request, env: Env): Promise<Response> 
         );
       }
     }
+
+    const detailedSummaryResult = {
+      overview: overviewResult.overview,
+      details: detailsResult.details,
+    };
 
     // Check if title is noise, if so generate a new one
     // Only attempt if we have content to work with
