@@ -161,6 +161,7 @@ export async function handleSave(request: Request, env: Env): Promise<Response> 
     const source = extractDomain(url);
 
     // Save to Supabase — include user_id for RLS
+    console.log('[save] detailedSummaryResult:', JSON.stringify(detailedSummaryResult));
     const item = await insertItem(env, {
       url,
       title: finalTitle,
@@ -183,6 +184,8 @@ export async function handleSave(request: Request, env: Env): Promise<Response> 
         category: null,
         detailed_summary: item.detailed_summary,
         created_at: item.created_at,
+        // DEBUG: include parsed detailedSummaryResult to verify parsing
+        _debug_detailed: detailedSummaryResult,
       }),
       { status: 200, headers: { 'Content-Type': 'application/json', ...corsHeaders } }
     );
