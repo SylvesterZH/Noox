@@ -140,37 +140,36 @@ export interface DetailedSummaryResult {
 }
 
 function buildDetailedPrompt(content: string, lang: string): string {
-  const langMap: Record<string, { label: string; outputLang: string }> = {
-    zh: { label: '中文', outputLang: '中文' },
-    ja: { label: '日本語', outputLang: '日本語' },
-    ko: { label: '한국어', outputLang: '한국어' },
-    multilingual: { label: 'the detected language', outputLang: 'the original language of the content' },
-    en: { label: 'English', outputLang: 'English' },
+  const langMap: Record<string, { label: string; outputLang: string; summaryTitle: string; detailsTitle: string }> = {
+    zh: { label: '中文', outputLang: '中文', summaryTitle: '概要', detailsTitle: '详述' },
+    ja: { label: '日本語', outputLang: '日本語', summaryTitle: '概要', detailsTitle: '詳述' },
+    ko: { label: '한국어', outputLang: '한국어', summaryTitle: '概要', detailsTitle: '詳述' },
+    multilingual: { label: 'the detected language', outputLang: 'the original language of the content', summaryTitle: 'Summary', detailsTitle: 'Details' },
+    en: { label: 'English', outputLang: 'English', summaryTitle: 'Summary', detailsTitle: 'Details' },
   };
 
-  const { label, outputLang } = langMap[lang] || langMap['en'];
+  const { label, outputLang, summaryTitle, detailsTitle } = langMap[lang] || langMap['en'];
 
   return `# 角色设定
-你是一个专业、高效的"核心信息提炼专家"。你的首要目标是帮助用户极大地节省阅读时间，从繁杂的文本中精准萃取最具价值的核心信息，以便用户进行快速扫读。
+你是一个专业、高效的"核心信息提炼专家"。你的首要目标是帮助用户极大地节省阅读时间，从繁杂的文本中精准萃取最具价值的核心信息，便于快速扫读。
 
 # 核心任务
-1. 语言镜像：自动识别用户提供文章的语种。**必须使用与原文完全相同的语言**进行后续的所有内容输出。
-2. 深度提炼：通读全文，剔除冗余的背景铺垫、过渡句和无关紧要的细节，仅保留文章的绝对核心观点、关键数据或有价值的结论。
+1. 绝对语言镜像：自动识别输入文章的语种。**你的所有输出内容（包括正文和排版标题）必须与原文语言完全一致！** 如果原文是英文，你的标题必须用 "Summary" 和 "Details"，正文必须全英文；以此类推。
+2. 深度提炼：剔除冗余背景、过渡句和无关细节，仅保留绝对核心观点和关键数据。
 
 # 严格约束条件
-1. 字数限制：总结的总长度**严格控制在 800 个字符以内**（包含标点符号和空格）。
-2. 客观中立：忠于原文，绝对不要添加任何个人的评判、引申或原文未提及的推测。
-3. 拒绝废话：不要输出诸如"这篇文章讲述了…"、"为您总结如下…"等无意义的开头或结尾，直接输出结果。
+1. 长度限制：输出总长度**严格控制在 800 个字符以内**。
+2. 客观中立：忠于原文，绝对不添加任何个人评判或推测。
+3. 拒绝废话：不要输出任何多余的开头寒暄或结尾（例如 "Here is the summary..."），直接输出结构化结果。
 
 # 输出格式
-请严格按照以下结构输出，以实现最高的阅读效率：
--  **概要**：（用精炼的 2-3 句话概括文章的核心目的、主要背景或最终结论）
--  **详述**：（使用项目符号，列出 3-8 条最具价值的核心信息、逻辑脉络或关键数据）
+(注意：请严格根据原文语言，自动替换下方括号中的标题名称)
 
-# 文章信息
-- 检测到的语种：${label}
+-  **[${summaryTitle}]**：（用精炼的 2-3 句话概括文章的核心目的、主要背景或最终结论）
+-  **[${detailsTitle}]**：（使用项目符号，列出 3-8 条最具价值的核心信息、逻辑脉络或关键数据）
 
-# 文章内容
+# 用户输入
+请提炼以下内容：
 ---
 ${content.substring(0, 3000)}
 ---`;
@@ -218,8 +217,9 @@ export async function generateDetailedSummary(
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
       const parsed = JSON.parse(jsonMatch[0]);
-      const overview = parsed['概要'] || parsed.overview || '';
-      const detailsRaw = parsed['详述'] || parsed.details || [];
+      // Check all possible keys based on language
+      const overview = parsed['概要'] || parsed['Summary'] || parsed['overview'] || parsed['summary'] || '';
+      const detailsRaw = parsed['详述'] || parsed['Details'] || parsed['details'] || parsed['詳述'] || [];
       const details = Array.isArray(detailsRaw) ? detailsRaw.slice(0, 8) : [];
       if (overview || details.length > 0) {
         return { overview, details };
@@ -230,14 +230,13 @@ export async function generateDetailedSummary(
   }
 
   // Fallback: try to parse plain text format
-  // Format 1: 概要：... 详述：- item1\n- item2
-  // Format 2: Overview: ... Details: - item1\n- item2
+  // Supports both Chinese and English labels
   try {
-    const overviewMatch = text.match(/(?:概要|Overview)[:：]\s*([^\n]*?)(?:\n|$)/i);
+    const overviewMatch = text.match(/(?:概要|Summary|Overview)[:：]\s*([^\n]*?)(?:\n|$)/i);
     const overview = overviewMatch ? overviewMatch[1].trim() : '';
     const details: string[] = [];
     // Match bullet points after 详述/Details section
-    const detailsSectionMatch = text.match(/(?:详述|Details)[:：]?\s*([\s\S]*?)$/i);
+    const detailsSectionMatch = text.match(/(?:详述|Details|詳述)[:：]?\s*([\s\S]*?)$/i);
     if (detailsSectionMatch) {
       const bulletMatches = detailsSectionMatch[1].match(/(?:^|\n)\s*[-*•]\s*(.+)/gm);
       if (bulletMatches) {
