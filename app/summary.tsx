@@ -52,9 +52,20 @@ function SummaryPage({ item, onOpenOriginal }: SummaryPageProps) {
     return date.toLocaleDateString();
   }
 
+  function detectLang(text: string): 'zh' | 'en' {
+    const sample = text.substring(0, 200);
+    const cjk = (sample.match(/[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]/g) || []).length;
+    const total = sample.replace(/\s/g, '').length;
+    return total > 0 && cjk / total > 0.3 ? 'zh' : 'en';
+  }
+
   const timeAgo = getTimeAgo(item.created_at);
   const ds = item.detailed_summary;
   const hasDetailedSummary = ds && (ds.overview || (ds.details && ds.details.length > 0));
+  const overviewText = ds?.overview || item.summary || '';
+  const lang = detectLang(overviewText);
+  const summaryLabel = lang === 'zh' ? '概要' : 'Summary';
+  const detailsLabel = lang === 'zh' ? '详述' : 'Details';
 
   return (
     <View style={[styles.pageContainer, { backgroundColor: colors.background }]}>
@@ -98,7 +109,7 @@ function SummaryPage({ item, onOpenOriginal }: SummaryPageProps) {
             {ds.overview ? (
               <View style={styles.overviewBlock}>
                 <Text style={[styles.sectionLabel, { color: colors.primary }]}>
-                  概要
+                  {summaryLabel}
                 </Text>
                 <Text style={[styles.overviewText, { color: colors.onSurface }]}>
                   {ds.overview}
@@ -110,7 +121,7 @@ function SummaryPage({ item, onOpenOriginal }: SummaryPageProps) {
             {ds.details && ds.details.length > 0 ? (
               <View style={styles.detailsBlock}>
                 <Text style={[styles.sectionLabel, { color: colors.primary }]}>
-                  详述
+                  {detailsLabel}
                 </Text>
                 {ds.details.map((detail, idx) => (
                   <View key={idx} style={styles.detailItem}>
@@ -132,7 +143,7 @@ function SummaryPage({ item, onOpenOriginal }: SummaryPageProps) {
           /* Fallback: show brief summary if no detailed summary */
           <View style={styles.summarySection}>
             <Text style={[styles.sectionLabel, { color: colors.primary }]}>
-              概要
+              {summaryLabel}
             </Text>
             <Text style={[styles.overviewText, { color: colors.onSurface }]}>
               {item.summary || 'No summary available'}
