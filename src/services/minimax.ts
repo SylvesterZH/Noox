@@ -212,6 +212,9 @@ export async function generateDetailedSummary(
   const data = await response.json();
   const text = data.choices?.[0]?.message?.content || '';
 
+  // DEBUG: log raw response
+  console.log('[generateDetailedSummary] raw response:', text.substring(0, 500));
+
   // Try to parse JSON from the response
   try {
     const jsonMatch = text.match(/\{[\s\S]*\}/);
@@ -221,11 +224,13 @@ export async function generateDetailedSummary(
       const overview = parsed['概要'] || parsed['Summary'] || parsed['overview'] || parsed['summary'] || '';
       const detailsRaw = parsed['详述'] || parsed['Details'] || parsed['details'] || parsed['詳述'] || [];
       const details = Array.isArray(detailsRaw) ? detailsRaw.slice(0, 8) : [];
+      console.log('[generateDetailedSummary] JSON parsed, overview length:', overview.length, 'details count:', details.length);
       if (overview || details.length > 0) {
         return { overview, details };
       }
     }
-  } catch {
+  } catch (e) {
+    console.error('[generateDetailedSummary] JSON parse error:', e);
     // Fall through to try text parsing
   }
 
@@ -246,10 +251,12 @@ export async function generateDetailedSummary(
         }
       }
     }
+    console.log('[generateDetailedSummary] text parsed, overview length:', overview.length, 'details count:', details.length);
     if (overview || details.length > 0) {
       return { overview: overview || content.substring(0, 150) + '...', details: details.slice(0, 8) };
     }
-  } catch {
+  } catch (e) {
+    console.error('[generateDetailedSummary] text parse error:', e);
     // Fall through to default
   }
 
