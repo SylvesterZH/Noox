@@ -200,7 +200,7 @@ export async function generateDetailedSummary(
         },
       ],
       temperature: 0.7,
-      max_tokens: 800,
+      max_tokens: 2000,
     }),
   });
 
@@ -248,10 +248,14 @@ export async function generateDetailedSummary(
     const details: string[] = [];
     // Match bullet points - support numbered lists (1. 2. etc) and bullet points (- * •)
     const detailsSectionMatch = cleanText.match(/(?:\*\*)?(?:详述|Details|詳述)(?:\*\*)?[:：：]?\s*([\s\S]*?)$/i);
+    console.log('[generateDetailedSummary] detailsSectionMatch:', detailsSectionMatch ? 'matched' : 'null');
     if (detailsSectionMatch) {
       const sectionContent = detailsSectionMatch[1];
+      console.log('[generateDetailedSummary] sectionContent length:', sectionContent.length);
+      console.log('[generateDetailedSummary] sectionContent preview:', sectionContent.substring(0, 200));
       // Match various bullet formats: "- item", "* item", "1. item", "① item", etc.
       const bulletMatches = sectionContent.match(/(?:^|\n)\s*(?:[-*•]|\d+\.|①|②|③|④|⑤|⑥|⑦|⑧)[.、]\s*(.+)/gm);
+      console.log('[generateDetailedSummary] bulletMatches count:', bulletMatches ? bulletMatches.length : 0);
       if (bulletMatches) {
         for (const m of bulletMatches) {
           const item = m.replace(/^\s*(?:[-*•]|\d+\.|①|②|③|④|⑤|⑥|⑦|⑧)[.、]\s*/, '').trim();
