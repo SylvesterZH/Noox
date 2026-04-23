@@ -212,12 +212,17 @@ export async function generateDetailedSummary(
   const data = await response.json();
   const text = data.choices?.[0]?.message?.content || '';
 
-  // DEBUG: log raw response
+  // DEBUG: log raw response (truncated)
   console.log('[generateDetailedSummary] raw response:', text.substring(0, 500));
+
+  // Step 0: Remove thinking tags if present
+  let cleanText = text.replace(/<\/?(?:think|thought)>/gi, '').trim();
+  // Also remove <think> and ]]> style tags
+  cleanText = cleanText.replace(/^(?:<think>|<\/思考>)[\s\S]*?(?:|<\/思考>)/i, '').trim();
 
   // Try to parse JSON from the response
   try {
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    const jsonMatch = cleanText.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
       const parsed = JSON.parse(jsonMatch[0]);
       // Check all possible keys based on language
@@ -235,18 +240,21 @@ export async function generateDetailedSummary(
   }
 
   // Fallback: try to parse plain text format
-  // Supports both Chinese and English labels
+  // Supports both Chinese and English labels, with or without markdown bold (**text**)
   try {
-    const overviewMatch = text.match(/(?:概要|Summary|Overview)[:：]\s*([^\n]*?)(?:\n|$)/i);
+    // Match patterns like "**概要**：" or "概要：" or "Summary:"
+    const overviewMatch = cleanText.match(/(?:\*\*)?(?:概要|Summary|Overview)(?:\*\*)?[:：]\s*([^\n]*?)(?:\n|$)/i);
     const overview = overviewMatch ? overviewMatch[1].trim() : '';
     const details: string[] = [];
-    // Match bullet points after 详述/Details section
-    const detailsSectionMatch = text.match(/(?:详述|Details|詳述)[:：]?\s*([\s\S]*?)$/i);
+    // Match bullet points - support numbered lists (1. 2. etc) and bullet points (- * •)
+    const detailsSectionMatch = cleanText.match(/(?:\*\*)?(?:详述|Details|詳述)(?:\*\*)?[:：：]?\s*([\s\S]*?)$/i);
     if (detailsSectionMatch) {
-      const bulletMatches = detailsSectionMatch[1].match(/(?:^|\n)\s*[-*•]\s*(.+)/gm);
+      const sectionContent = detailsSectionMatch[1];
+      // Match various bullet formats: "- item", "* item", "1. item", "① item", etc.
+      const bulletMatches = sectionContent.match(/(?:^|\n)\s*(?:[-*•]|\d+\.|①|②|③|④|⑤|⑥|⑦|⑧)[.、]\s*(.+)/gm);
       if (bulletMatches) {
         for (const m of bulletMatches) {
-          const item = m.replace(/^\s*[-*•]\s*/, '').trim();
+          const item = m.replace(/^\s*(?:[-*•]|\d+\.|①|②|③|④|⑤|⑥|⑦|⑧)[.、]\s*/, '').trim();
           if (item) details.push(item);
         }
       }
