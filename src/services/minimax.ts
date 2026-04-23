@@ -218,18 +218,43 @@ export async function generateDetailedSummary(
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
       const parsed = JSON.parse(jsonMatch[0]);
-      return {
-        overview: parsed['概要'] || parsed.overview || '',
-        details: Array.isArray(parsed['详述'] || parsed.details)
-          ? (parsed['详述'] || parsed.details).slice(0, 8)
-          : [],
-      };
+      const overview = parsed['概要'] || parsed.overview || '';
+      const detailsRaw = parsed['详述'] || parsed.details || [];
+      const details = Array.isArray(detailsRaw) ? detailsRaw.slice(0, 8) : [];
+      if (overview || details.length > 0) {
+        return { overview, details };
+      }
+    }
+  } catch {
+    // Fall through to try text parsing
+  }
+
+  // Fallback: try to parse plain text format
+  // Format 1: 概要：... 详述：- item1\n- item2
+  // Format 2: Overview: ... Details: - item1\n- item2
+  try {
+    const overviewMatch = text.match(/(?:概要|Overview)[:：]\s*([^\n]*?)(?:\n|$)/i);
+    const overview = overviewMatch ? overviewMatch[1].trim() : '';
+    const details: string[] = [];
+    // Match bullet points after 详述/Details section
+    const detailsSectionMatch = text.match(/(?:详述|Details)[:：]?\s*([\s\S]*?)$/i);
+    if (detailsSectionMatch) {
+      const bulletMatches = detailsSectionMatch[1].match(/(?:^|\n)\s*[-*•]\s*(.+)/gm);
+      if (bulletMatches) {
+        for (const m of bulletMatches) {
+          const item = m.replace(/^\s*[-*•]\s*/, '').trim();
+          if (item) details.push(item);
+        }
+      }
+    }
+    if (overview || details.length > 0) {
+      return { overview: overview || content.substring(0, 150) + '...', details: details.slice(0, 8) };
     }
   } catch {
     // Fall through to default
   }
 
-  // Fallback if JSON parsing fails
+  // Fallback if all parsing fails
   return {
     overview: content.substring(0, 150) + '...',
     details: [],
