@@ -10,6 +10,7 @@ export interface Item {
   category?: { name: string; color: string } | null;
   tags: string[];
   content_text: string | null;
+  detailed_summary: { overview: string; details: string[] } | null;
   created_at: string;
 }
 
@@ -72,6 +73,7 @@ export async function insertItem(
     tags: string[];
     content_text: string;
     user_id: string;  // Required for RLS
+    detailed_summary?: { overview: string; details: string[] } | null;
   },
   userToken?: string | null
 ): Promise<Item> {

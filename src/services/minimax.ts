@@ -134,6 +134,108 @@ ${content.substring(0, 3000)}
   };
 }
 
+export interface DetailedSummaryResult {
+  overview: string;
+  details: string[];
+}
+
+function buildDetailedPrompt(content: string, lang: string): string {
+  const langMap: Record<string, { label: string; outputLang: string }> = {
+    zh: { label: '中文', outputLang: '中文' },
+    ja: { label: '日本語', outputLang: '日本語' },
+    ko: { label: '한국어', outputLang: '한국어' },
+    multilingual: { label: 'the detected language', outputLang: 'the original language of the content' },
+    en: { label: 'English', outputLang: 'English' },
+  };
+
+  const { label, outputLang } = langMap[lang] || langMap['en'];
+
+  return `# 角色设定
+你是一个专业、高效的"核心信息提炼专家"。你的首要目标是帮助用户极大地节省阅读时间，从繁杂的文本中精准萃取最具价值的核心信息，以便用户进行快速扫读。
+
+# 核心任务
+1. 语言镜像：自动识别用户提供文章的语种。**必须使用与原文完全相同的语言**进行后续的所有内容输出。
+2. 深度提炼：通读全文，剔除冗余的背景铺垫、过渡句和无关紧要的细节，仅保留文章的绝对核心观点、关键数据或有价值的结论。
+
+# 严格约束条件
+1. 字数限制：总结的总长度**严格控制在 800 个字符以内**（包含标点符号和空格）。
+2. 客观中立：忠于原文，绝对不要添加任何个人的评判、引申或原文未提及的推测。
+3. 拒绝废话：不要输出诸如"这篇文章讲述了…"、"为您总结如下…"等无意义的开头或结尾，直接输出结果。
+
+# 输出格式
+请严格按照以下结构输出，以实现最高的阅读效率：
+-  **概要**：（用精炼的 2-3 句话概括文章的核心目的、主要背景或最终结论）
+-  **详述**：（使用项目符号，列出 3-8 条最具价值的核心信息、逻辑脉络或关键数据）
+
+# 文章信息
+- 检测到的语种：${label}
+
+# 文章内容
+---
+${content.substring(0, 3000)}
+---`;
+}
+
+export async function generateDetailedSummary(
+  env: Env,
+  content: string
+): Promise<DetailedSummaryResult> {
+  const lang = detectLanguage(content);
+  const prompt = buildDetailedPrompt(content, lang);
+
+  const MINIMAX_BASE_URL = 'https://api.minimaxi.com/v1';
+  const MINIMAX_MODEL = 'MiniMax-M2.7';
+
+  const response = await fetch(`${MINIMAX_BASE_URL}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${env.MINIMAX_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: MINIMAX_MODEL,
+      messages: [
+        {
+          role: 'user',
+          content: prompt,
+        },
+      ],
+      temperature: 0.7,
+      max_tokens: 800,
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`MiniMax API error: ${response.status} - ${errorText}`);
+  }
+
+  const data = await response.json();
+  const text = data.choices?.[0]?.message?.content || '';
+
+  // Try to parse JSON from the response
+  try {
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]);
+      return {
+        overview: parsed['概要'] || parsed.overview || '',
+        details: Array.isArray(parsed['详述'] || parsed.details)
+          ? (parsed['详述'] || parsed.details).slice(0, 8)
+          : [],
+      };
+    }
+  } catch {
+    // Fall through to default
+  }
+
+  // Fallback if JSON parsing fails
+  return {
+    overview: content.substring(0, 150) + '...',
+    details: [],
+  };
+}
+
 export async function generateTitle(
   env: Env,
   content: string,

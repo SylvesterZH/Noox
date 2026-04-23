@@ -1,6 +1,6 @@
 import { Env } from '../index';
 import { fetchPage, extractDomain, parseMarkdown, parseHtmlContent, extractTitleFromText, isNoiseTitle } from '../services/jina';
-import { generateSummary, generateTitle } from '../services/minimax';
+import { generateSummary, generateTitle, generateDetailedSummary } from '../services/minimax';
 import { insertItem, checkDuplicate } from '../services/supabase';
 import { requireUser } from '../services/auth';
 
@@ -121,12 +121,20 @@ export async function handleSave(request: Request, env: Env): Promise<Response> 
 
     // Generate AI summary — skip if no content available
     let summaryResult;
+    let detailedSummaryResult;
     if (!parsed.content || parsed.content.trim().length === 0) {
-      // No content to summarize (blocked/private page) — save with empty summary
+      // No content to summarize (blocked/private page) — save with empty summaries
       summaryResult = { summary: '', tags: [] };
+      detailedSummaryResult = { overview: '', details: [] };
     } else {
       try {
-        summaryResult = await generateSummary(env, parsed.content);
+        // Generate both brief summary and detailed summary in parallel
+        const [summaryRes, detailedRes] = await Promise.all([
+          generateSummary(env, parsed.content),
+          generateDetailedSummary(env, parsed.content),
+        ]);
+        summaryResult = summaryRes;
+        detailedSummaryResult = detailedRes;
       } catch (err) {
         console.error('AI summary failed:', err);
         return new Response(
@@ -161,6 +169,7 @@ export async function handleSave(request: Request, env: Env): Promise<Response> 
       tags: summaryResult.tags,
       content_text: parsed.content.substring(0, 2000),
       user_id: user.id,
+      detailed_summary: detailedSummaryResult,
     }, token);
 
     return new Response(
@@ -172,6 +181,7 @@ export async function handleSave(request: Request, env: Env): Promise<Response> 
         source: item.source,
         tags: item.tags,
         category: null,
+        detailed_summary: item.detailed_summary,
         created_at: item.created_at,
       }),
       { status: 200, headers: { 'Content-Type': 'application/json', ...corsHeaders } }
