@@ -289,7 +289,7 @@ export async function generateTitle(env: Env, content: string, lang: string = 'e
       model: MINIMAX_MODEL,
       messages: [{ role: 'user', content: prompt }],
       temperature: 0.7,
-      max_tokens: 50,
+      max_tokens: 300,
     }),
   });
 
