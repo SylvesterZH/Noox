@@ -152,19 +152,39 @@ function SummaryPage({ item, onOpenOriginal }: SummaryPageProps) {
                 <Text style={[styles.sectionLabel, { color: colors.primary }]}>
                   {detailsLabel}
                 </Text>
-                {extractedDetails.map((detail: string, idx: number) => (
-                  <View key={idx} style={styles.detailItem}>
-                    <View
-                      style={[
-                        styles.bullet,
-                        { backgroundColor: colors.primary },
-                      ]}
-                    />
-                    <Text style={[styles.detailText, { color: colors.onSurface }]}>
-                      {detail}
-                    </Text>
-                  </View>
-                ))}
+                {extractedDetails.map((detail: any, idx: number) => {
+                  const isObject = typeof detail === 'object' && detail !== null;
+                  const subtitle = isObject ? detail.subtitle : null;
+                  const content = isObject ? detail.content : detail;
+
+                  if (isObject && subtitle) {
+                    return (
+                      <View key={idx} style={styles.structuredDetailItem}>
+                        <Text style={[styles.detailSubtitle, { color: colors.onSurface }]}>
+                          {subtitle}
+                        </Text>
+                        <Text style={[styles.structuredDetailText, { color: colors.onSurfaceVariant }]}>
+                          {content}
+                        </Text>
+                      </View>
+                    );
+                  }
+
+                  // Fallback for legacy string data
+                  return (
+                    <View key={idx} style={styles.detailItem}>
+                      <View
+                        style={[
+                          styles.bullet,
+                          { backgroundColor: colors.primary },
+                        ]}
+                      />
+                      <Text style={[styles.detailText, { color: colors.onSurface }]}>
+                        {content}
+                      </Text>
+                    </View>
+                  );
+                })}
               </View>
             ) : null}
           </View>
@@ -620,6 +640,20 @@ const styles = StyleSheet.create({
   },
   detailText: {
     flex: 1,
+    fontSize: fontSizes.md,
+    lineHeight: 26,
+    opacity: 0.85,
+  },
+  structuredDetailItem: {
+    marginBottom: spacing.xl,
+  },
+  detailSubtitle: {
+    fontSize: fontSizes.md,
+    fontWeight: '700',
+    marginBottom: spacing.xs,
+    lineHeight: 24,
+  },
+  structuredDetailText: {
     fontSize: fontSizes.md,
     lineHeight: 26,
     opacity: 0.85,

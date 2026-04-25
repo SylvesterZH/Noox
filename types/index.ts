@@ -11,7 +11,7 @@ export interface Item {
   thumbnail_url?: string;
   detailed_summary: {
     overview: string;
-    details: string[];
+    details: Array<{ subtitle?: string; content?: string } | string>;
   } | null;
 }
 
@@ -30,7 +30,10 @@ export interface SaveResponse {
   source: string;
   tags: string[];
   category: string | null;
-  detailed_summary: { overview: string; details: string[] } | null;
+  detailed_summary: { 
+    overview: string; 
+    details: Array<{ subtitle?: string; content?: string } | string>;
+  } | null;
   created_at: string;
 }
 
