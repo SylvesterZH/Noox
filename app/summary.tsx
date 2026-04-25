@@ -60,7 +60,17 @@ function SummaryPage({ item, onOpenOriginal }: SummaryPageProps) {
   }
 
   const timeAgo = getTimeAgo(item.created_at);
-  const ds = item.detailed_summary;
+  let ds = item.detailed_summary;
+
+  // If detailed_summary was stored as a string in the DB by mistake, parse it
+  if (typeof ds === 'string') {
+    try {
+      ds = JSON.parse(ds);
+    } catch (e) {
+      console.error('Failed to parse detailed_summary string', e);
+      ds = null;
+    }
+  }
 
   // Support cases where details might be double-wrapped like { details: { details: [...] } } or single wrapped { overview: "", details: [...] }
   let extractedDetails = ds?.details || [];
