@@ -210,7 +210,7 @@ function parseOverview(text: string): string {
 
 function parseDetails(text: string): string[] {
   // Remove thinking block entirely
-  let clean = text.replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/\[[^\]]*\]\s*/g, '').trim();
+  let clean = text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
 
   // Try JSON parsing (greedy match to handle braces inside strings)
   const jsonMatch = clean.match(/\{[\s\S]*\}/);
@@ -222,7 +222,7 @@ function parseDetails(text: string): string[] {
         if (Array.isArray(parsed[key])) {
           return parsed[key]
             .filter((v: unknown) => typeof v === 'string')
-            .map((v: string) => v.trim())
+            .map((v: string) => v.replace(/\[[^\]]*\]\s*/g, '').trim())
             .filter(Boolean)
             .slice(0, 8);
         }
@@ -311,5 +311,4 @@ export async function generateTitle(env: Env, content: string, lang: string = 'e
   } catch { /* fall through */ }
 
   return { title: 'Untitled' };
-}'Untitled' };
 }
