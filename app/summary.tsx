@@ -61,8 +61,27 @@ function SummaryPage({ item, onOpenOriginal }: SummaryPageProps) {
 
   const timeAgo = getTimeAgo(item.created_at);
   const ds = item.detailed_summary;
-  const hasDetailedSummary = ds && (ds.overview || (ds.details && ds.details.length > 0));
-  const overviewText = ds?.overview || item.summary || '';
+
+  // Support cases where details might be double-wrapped like { details: { details: [...] } } or single wrapped { overview: "", details: [...] }
+  let extractedDetails = ds?.details || [];
+  if (extractedDetails && typeof extractedDetails === 'object' && !Array.isArray(extractedDetails)) {
+    if (Array.isArray((extractedDetails as any).details)) {
+      extractedDetails = (extractedDetails as any).details;
+    }
+  }
+
+  // Handle case where overview comes as object { overview: "..." }
+  let extractedOverview = ds?.overview || '';
+  if (extractedOverview && typeof extractedOverview === 'object') {
+     if (typeof (extractedOverview as any).overview === 'string') {
+        extractedOverview = (extractedOverview as any).overview;
+     } else {
+        extractedOverview = '';
+     }
+  }
+
+  const hasDetailedSummary = !!(extractedOverview || (extractedDetails && extractedDetails.length > 0));
+  const overviewText = extractedOverview || item.summary || '';
   const lang = detectLang(overviewText);
   const summaryLabel = lang === 'zh' ? '概要' : 'Summary';
   const detailsLabel = lang === 'zh' ? '详述' : 'Details';
@@ -106,24 +125,24 @@ function SummaryPage({ item, onOpenOriginal }: SummaryPageProps) {
         {hasDetailedSummary ? (
           <View style={styles.summarySection}>
             {/* Overview */}
-            {ds.overview ? (
+            {extractedOverview ? (
               <View style={styles.overviewBlock}>
                 <Text style={[styles.sectionLabel, { color: colors.primary }]}>
                   {summaryLabel}
                 </Text>
                 <Text style={[styles.overviewText, { color: colors.onSurface }]}>
-                  {ds.overview}
+                  {extractedOverview}
                 </Text>
               </View>
             ) : null}
 
             {/* Details */}
-            {ds.details && ds.details.length > 0 ? (
+            {extractedDetails && extractedDetails.length > 0 ? (
               <View style={styles.detailsBlock}>
                 <Text style={[styles.sectionLabel, { color: colors.primary }]}>
                   {detailsLabel}
                 </Text>
-                {ds.details.map((detail, idx) => (
+                {extractedDetails.map((detail: string, idx: number) => (
                   <View key={idx} style={styles.detailItem}>
                     <View
                       style={[
@@ -250,7 +269,7 @@ export default function SummaryScreen() {
   }, [authLoading, user]);
 
   // Get shared items from global store (set by FeedScreen before navigating)
-  const items = global.__noox_summary_items__ || [];
+  const items = (global as any).__noox_summary_items__ || [];
   const initialIndex = itemId
     ? items.findIndex((i: Item) => i.id === itemId)
     : 0;
