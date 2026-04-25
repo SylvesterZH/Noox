@@ -20,6 +20,7 @@ export interface DetailsResult {
 export interface UnifiedAIResult {
   title: string;
   overview: string;
+  tags: string[];
   details: Array<{ subtitle: string; content: string } | string>;
 }
 
@@ -56,27 +57,33 @@ function buildUnifiedPrompt(content: string, lang: string): string {
 # 核心任务
 1. 绝对语言镜像：自动识别输入文章的语种。你的所有输出内容必须与原文语言完全一致（使用 ${label}）。
 2. 提取标题：为文章生成或提取一个准确且简短的标题（10-30个字符）。
-3. 提炼概要：用精炼的 2-3 句话概括文章的核心目的、主要背景或最终结论（不超过300个字符）。
-4. 结构化详述：提取文章的 3-5 个核心模块/逻辑脉络。每个模块必须包含一个高度概括的「小标题」（subtitle）和一段有血有肉、条理清晰的「核心内容」（content）。不要使用任何 emoji 或特殊符号（如 * 或 #）。
+3. 提取标签：提供 3-5 个最能概括文章分类或核心实体的标签（tags）。
+4. 提炼概要：用精炼的 2-3 句话概括文章的核心目的、主要背景或最终结论（不超过300个字符）。
+5. 结构化详述：请务必提取文章的 3 到 5 个核心模块/逻辑脉络。每个模块必须包含一个高度概括的「小标题」（subtitle）和一段有血有肉、条理清晰的「核心内容」（content）。不要使用任何 emoji 或特殊符号。
 
 # 严格约束条件
 1. 客观中立：忠于原文，绝对不添加任何个人评判或推测。
 2. 拒绝废话：不输出任何多余的开头寒暄，必须直接且仅输出JSON。
-3. 结构严谨：小标题要求极简、克制；核心内容要求丰满、有逻辑（每个模块的内容长度控制在 50-150 字）。
+3. 结构严谨：详述（details）必须输出 3 到 5 个对象。小标题要求极简、克制；核心内容要求丰满、有逻辑（每个模块的内容长度控制在 50-150 字）。如果文章较短，请尽可能拆分出至少 2-3 个独立视角。
 
 # 输出格式
 请务必直接输出以下JSON格式，不要包含任何其他文字或 markdown 格式：
 {
   "title": "[文章标题]",
+  "tags": ["[标签1]", "[标签2]", "[标签3]"],
   "overview": "[2-3句概括]",
   "details": [
     {
-      "subtitle": "[小标题，例如：弱者的献祭（导火索）]",
-      "content": "[丰满的核心内容段落]"
+      "subtitle": "[小标题1，例如：弱者的献祭（导火索）]",
+      "content": "[丰满的核心内容段落1]"
     },
     {
-      "subtitle": "[小标题]",
-      "content": "[丰满的核心内容段落]"
+      "subtitle": "[小标题2]",
+      "content": "[丰满的核心内容段落2]"
+    },
+    {
+      "subtitle": "[小标题3]",
+      "content": "[丰满的核心内容段落3]"
     }
   ]
 }
@@ -138,6 +145,7 @@ export async function generateUnifiedSummary(env: Env, content: string): Promise
       return {
         title: typeof parsed.title === 'string' ? parsed.title.trim() : 'Untitled',
         overview: typeof parsed.overview === 'string' ? parsed.overview.trim() : '',
+        tags: Array.isArray(parsed.tags) ? parsed.tags.filter(t => typeof t === 'string').map(t => t.trim()).slice(0, 5) : [],
         details: processedDetails
       };
     }
@@ -149,6 +157,7 @@ export async function generateUnifiedSummary(env: Env, content: string): Promise
   return {
     title: 'Untitled',
     overview: content.substring(0, 150) + '...',
+    tags: [],
     details: []
   };
 }

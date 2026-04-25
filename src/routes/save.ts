@@ -120,20 +120,17 @@ export async function handleSave(request: Request, env: Env): Promise<Response> 
     }
 
     // Generate AI summary — skip if no content available
-    let summaryResult;
-    let unifiedResult = { title: parsed.title, overview: '', details: [] as string[] };
+    let summaryResult = { summary: '', tags: [] as string[] };
+    let unifiedResult = { title: parsed.title, overview: '', tags: [] as string[], details: [] as Array<{ subtitle: string; content: string } | string> };
     if (!parsed.content || parsed.content.trim().length === 0) {
       // No content to summarize (blocked/private page) — save with empty summaries
-      summaryResult = { summary: '', tags: [] };
     } else {
       try {
-        // Generate brief summary and unified details in parallel
-        const [summaryRes, unifiedRes] = await Promise.all([
-          generateSummary(env, parsed.content),
-          generateUnifiedSummary(env, parsed.content),
-        ]);
-        summaryResult = summaryRes;
-        unifiedResult = unifiedRes;
+        unifiedResult = await generateUnifiedSummary(env, parsed.content);
+        summaryResult = { 
+          summary: unifiedResult.overview || parsed.content.substring(0, 150) + '...', 
+          tags: unifiedResult.tags 
+        };
       } catch (err) {
         console.error('AI summary failed:', err);
         return new Response(
