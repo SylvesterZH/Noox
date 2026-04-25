@@ -184,8 +184,8 @@ async function callMinimax(prompt: string, env: Env): Promise<string> {
 }
 
 function parseOverview(text: string): string {
-  // Remove thinking block entirely, then extra markdown or whitespace
-  let clean = text.replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/\[[^\]]*\]\s*/g, '').trim();
+  // Remove thinking block entirely, then extra whitespace
+  let clean = text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
 
   // Try JSON parsing (greedy match to handle braces inside strings)
   const jsonMatch = clean.match(/\{[\s\S]*\}/);
@@ -196,7 +196,7 @@ function parseOverview(text: string): string {
       const keys = ['概要', '概要', '詳述', 'Summary', 'Resumo', 'Resumen', 'Résumé', 'Zusammenfassung', 'summary', 'overview', 'Overview'];
       for (const key of keys) {
         if (parsed[key] && typeof parsed[key] === 'string') {
-          const val = parsed[key].trim();
+          const val = parsed[key].replace(/\[[^\]]*\]\s*/g, '').trim(); // clean the value, not the raw JSON
           // Reject if it looks like article content (too long)
           if (val.length > 500) continue;
           return val;
@@ -311,4 +311,5 @@ export async function generateTitle(env: Env, content: string, lang: string = 'e
   } catch { /* fall through */ }
 
   return { title: 'Untitled' };
+}'Untitled' };
 }
