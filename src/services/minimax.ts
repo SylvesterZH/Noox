@@ -63,7 +63,8 @@ export async function generateSummary(env: Env, content: string): Promise<Summar
   const text = data.choices?.[0]?.message?.content || '';
 
   try {
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    const clean = text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+    const jsonMatch = clean.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
       const parsed = JSON.parse(jsonMatch[0]);
       return {
@@ -183,11 +184,11 @@ async function callMinimax(prompt: string, env: Env): Promise<string> {
 }
 
 function parseOverview(text: string): string {
-  // Remove thinking tags and extra whitespace
-  let clean = text.replace(/<[^>]+>/g, '').replace(/\[[^\]]*\]\s*/g, '').trim();
+  // Remove thinking block entirely, then extra markdown or whitespace
+  let clean = text.replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/\[[^\]]*\]\s*/g, '').trim();
 
-  // Try JSON parsing
-  const jsonMatch = clean.match(/\{[\s\S]*?\}/);
+  // Try JSON parsing (greedy match to handle braces inside strings)
+  const jsonMatch = clean.match(/\{[\s\S]*\}/);
   if (jsonMatch) {
     try {
       const parsed = JSON.parse(jsonMatch[0]);
@@ -208,9 +209,11 @@ function parseOverview(text: string): string {
 }
 
 function parseDetails(text: string): string[] {
-  let clean = text.replace(/<[^>]+>/g, '').replace(/\[[^\]]*\]\s*/g, '').trim();
+  // Remove thinking block entirely
+  let clean = text.replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/\[[^\]]*\]\s*/g, '').trim();
 
-  const jsonMatch = clean.match(/\{[\s\S]*?\}/);
+  // Try JSON parsing (greedy match to handle braces inside strings)
+  const jsonMatch = clean.match(/\{[\s\S]*\}/);
   if (jsonMatch) {
     try {
       const parsed = JSON.parse(jsonMatch[0]);
@@ -299,7 +302,8 @@ export async function generateTitle(env: Env, content: string, lang: string = 'e
   const text = data.choices?.[0]?.message?.content || '';
 
   try {
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    const clean = text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+    const jsonMatch = clean.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
       const parsed = JSON.parse(jsonMatch[0]);
       return { title: parsed.title || 'Untitled' };
