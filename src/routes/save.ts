@@ -149,11 +149,12 @@ export async function handleSave(request: Request, env: Env): Promise<Response> 
     };
 
     let finalTitle = parsed.title;
-    // Use the AI generated title if the original was noise OR if the AI generated a valid non-empty title and the original is generic
-    if (unifiedResult.title && unifiedResult.title !== 'Untitled' && unifiedResult.title !== finalTitle) {
-       if (isNoiseTitle(finalTitle) || finalTitle === extractDomain(url)) {
-           finalTitle = unifiedResult.title;
-       }
+    // Always prefer the AI generated title if it is valid and not 'Untitled'
+    // since parsed.title is often just an author name or date from the first line of text
+    if (unifiedResult.title && unifiedResult.title !== 'Untitled' && unifiedResult.title.length > 3) {
+       finalTitle = unifiedResult.title;
+    } else if (isNoiseTitle(finalTitle) || finalTitle === extractDomain(url)) {
+       finalTitle = unifiedResult.title || 'Untitled';
     }
 
     // Extract domain

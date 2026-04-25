@@ -20,7 +20,7 @@ export interface DetailsResult {
 export interface UnifiedAIResult {
   title: string;
   overview: string;
-  details: string[];
+  details: Array<{ subtitle: string; content: string } | string>;
 }
 
 function detectLanguage(text: string): string {
@@ -57,11 +57,12 @@ function buildUnifiedPrompt(content: string, lang: string): string {
 1. 绝对语言镜像：自动识别输入文章的语种。你的所有输出内容必须与原文语言完全一致（使用 ${label}）。
 2. 提取标题：为文章生成或提取一个准确且简短的标题（10-30个字符）。
 3. 提炼概要：用精炼的 2-3 句话概括文章的核心目的、主要背景或最终结论（不超过300个字符）。
-4. 提取详述：剔除冗余的背景铺垫、过渡句和无关细节，仅保留文章的绝对核心观点或有价值的数据（提取3-8条）。
+4. 结构化详述：提取文章的 3-5 个核心模块/逻辑脉络。每个模块必须包含一个高度概括的「小标题」（subtitle）和一段有血有肉、条理清晰的「核心内容」（content）。不要使用任何 emoji 或特殊符号（如 * 或 #）。
 
 # 严格约束条件
 1. 客观中立：忠于原文，绝对不添加任何个人评判或推测。
 2. 拒绝废话：不输出任何多余的开头寒暄，必须直接且仅输出JSON。
+3. 结构严谨：小标题要求极简、克制；核心内容要求丰满、有逻辑（每个模块的内容长度控制在 50-150 字）。
 
 # 输出格式
 请务必直接输出以下JSON格式，不要包含任何其他文字或 markdown 格式：
@@ -69,9 +70,14 @@ function buildUnifiedPrompt(content: string, lang: string): string {
   "title": "[文章标题]",
   "overview": "[2-3句概括]",
   "details": [
-    "[要点1]",
-    "[要点2]",
-    "[要点3]"
+    {
+      "subtitle": "[小标题，例如：弱者的献祭（导火索）]",
+      "content": "[丰满的核心内容段落]"
+    },
+    {
+      "subtitle": "[小标题]",
+      "content": "[丰满的核心内容段落]"
+    }
   ]
 }
 
@@ -115,12 +121,24 @@ export async function generateUnifiedSummary(env: Env, content: string): Promise
     if (jsonMatch) {
       const parsed = JSON.parse(jsonMatch[0]);
       
+      let processedDetails: Array<{subtitle: string, content: string} | string> = [];
+      if (Array.isArray(parsed.details)) {
+        processedDetails = parsed.details.map((item: any) => {
+          if (typeof item === 'string') return item.trim();
+          if (typeof item === 'object' && item !== null) {
+            return {
+              subtitle: typeof item.subtitle === 'string' ? item.subtitle.trim() : '',
+              content: typeof item.content === 'string' ? item.content.trim() : ''
+            };
+          }
+          return '';
+        }).filter((item: any) => item !== '' && (typeof item === 'string' || item.content !== '')).slice(0, 8);
+      }
+
       return {
         title: typeof parsed.title === 'string' ? parsed.title.trim() : 'Untitled',
         overview: typeof parsed.overview === 'string' ? parsed.overview.trim() : '',
-        details: Array.isArray(parsed.details) 
-          ? parsed.details.filter(v => typeof v === 'string').map(v => v.trim()).slice(0, 8) 
-          : []
+        details: processedDetails
       };
     }
   } catch (err) {
