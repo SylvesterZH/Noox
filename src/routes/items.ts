@@ -39,6 +39,7 @@ export async function handleGetItems(request: Request, env: Env): Promise<Respon
       url: item.url,
       title: item.title,
       summary: item.summary,
+      detailed_summary: item.detailed_summary,
       source: item.source,
       category: item.category?.name || null,
       category_color: item.category?.color || null,
