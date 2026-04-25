@@ -1,6 +1,6 @@
 import { Env } from '../index';
 import { fetchPage, extractDomain, parseMarkdown, parseHtmlContent, extractTitleFromText, isNoiseTitle } from '../services/jina';
-import { generateSummary, generateTitle, generateOverview, generateDetails } from '../services/minimax';
+import { generateSummary, generateUnifiedSummary, generateTitle, generateOverview, generateDetails } from '../services/minimax';
 import { insertItem, checkDuplicate } from '../services/supabase';
 import { requireUser } from '../services/auth';
 
@@ -121,24 +121,19 @@ export async function handleSave(request: Request, env: Env): Promise<Response> 
 
     // Generate AI summary — skip if no content available
     let summaryResult;
-    let overviewResult;
-    let detailsResult;
+    let unifiedResult = { title: parsed.title, overview: '', details: [] as string[] };
     if (!parsed.content || parsed.content.trim().length === 0) {
       // No content to summarize (blocked/private page) — save with empty summaries
       summaryResult = { summary: '', tags: [] };
-      overviewResult = { overview: '' };
-      detailsResult = { details: [] };
     } else {
       try {
-        // Generate brief summary, overview, and details in parallel
-        const [summaryRes, overviewRes, detailsRes] = await Promise.all([
+        // Generate brief summary and unified details in parallel
+        const [summaryRes, unifiedRes] = await Promise.all([
           generateSummary(env, parsed.content),
-          generateOverview(env, parsed.content),
-          generateDetails(env, parsed.content),
+          generateUnifiedSummary(env, parsed.content),
         ]);
         summaryResult = summaryRes;
-        overviewResult = overviewRes;
-        detailsResult = detailsRes;
+        unifiedResult = unifiedRes;
       } catch (err) {
         console.error('AI summary failed:', err);
         return new Response(
@@ -149,21 +144,16 @@ export async function handleSave(request: Request, env: Env): Promise<Response> 
     }
 
     const detailedSummaryResult = {
-      overview: overviewResult.overview,
-      details: detailsResult.details,
+      overview: unifiedResult.overview,
+      details: unifiedResult.details,
     };
 
-    // Check if title is noise, if so generate a new one
-    // Only attempt if we have content to work with
     let finalTitle = parsed.title;
-    if (isNoiseTitle(finalTitle) && parsed.content && parsed.content.trim().length > 0) {
-      try {
-        const titleResult = await generateTitle(env, parsed.content);
-        finalTitle = titleResult.title;
-      } catch (err) {
-        console.error('AI title generation failed:', err);
-        // Keep the original title even if it's noise
-      }
+    // Use the AI generated title if the original was noise OR if the AI generated a valid non-empty title and the original is generic
+    if (unifiedResult.title && unifiedResult.title !== 'Untitled' && unifiedResult.title !== finalTitle) {
+       if (isNoiseTitle(finalTitle) || finalTitle === extractDomain(url)) {
+           finalTitle = unifiedResult.title;
+       }
     }
 
     // Extract domain
